@@ -27,7 +27,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -ldflags="-w -s \
     -X 'main.Version=${VERSION}' \
     -X 'main.BuildDate=${BUILD_DATE}'" \
-    -o proxy-server .
+    -o app .
 
 # 最终镜像
 FROM alpine:3.18
@@ -45,17 +45,17 @@ RUN apk add --no-cache \
     && update-ca-certificates
 
 # 创建非root用户
-RUN addgroup -g 1000 -S proxy && \
-    adduser -u 1000 -S proxy -G proxy
+RUN addgroup -g 1000 -S app && \
+    adduser -u 1000 -S app -G app
 
 # 复制可执行文件
-COPY --from=builder --chown=proxy:proxy /app/proxy-server /app/
+COPY --from=builder --chown=app:app /app/app /app/
 
 # 创建必要的目录
-RUN mkdir -p /app/tmp && chown -R proxy:proxy /app/tmp
+RUN mkdir -p /app/tmp && chown -R app:app /app/tmp
 
 # 切换用户
-USER proxy
+USER app
 
 # 暴露端口
 EXPOSE 7860
@@ -64,4 +64,4 @@ EXPOSE 7860
 VOLUME ["/app/tmp"]
 
 # 启动命令
-CMD ["/app/proxy-server"]
+CMD ["/app/app"]

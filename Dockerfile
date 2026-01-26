@@ -51,6 +51,9 @@ RUN addgroup -g 1000 -S app && \
 # 复制可执行文件
 COPY --from=builder --chown=app:app /app/app /app/
 
+# 复制配置文件（如果有）
+COPY --chown=app:app index.html /app/
+
 # 创建必要的目录
 RUN mkdir -p /app/tmp && chown -R app:app /app/tmp
 

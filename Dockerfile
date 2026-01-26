@@ -1,13 +1,13 @@
-# 第一阶段：构建Go应用
-FROM golang:1.21-alpine AS builder
-
-# 安装必要的构建工具
-RUN apk add --no-cache git build-base
+# 使用多阶段构建以减小镜像大小
+FROM --platform=$BUILDPLATFORM golang:1.21-alpine AS builder
 
 # 设置工作目录
 WORKDIR /app
 
-# 复制go.mod和go.sum文件
+# 安装构建依赖
+RUN apk add --no-cache git
+
+# 复制go模块文件
 COPY go.mod go.sum ./
 
 # 下载依赖
@@ -16,44 +16,55 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
+# 设置构建参数
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=latest
+ARG BUILD_DATE
+
 # 构建应用
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o server main.go
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -ldflags="-w -s \
+    -X 'main.Version=${VERSION}' \
+    -X 'main.BuildDate=${BUILD_DATE}'" \
+    -o proxy-server .
 
-# 第二阶段：创建轻量级运行镜像
-FROM alpine:latest
+# 最终镜像
+FROM alpine:3.18
 
-# 安装必要的运行时依赖
+# 设置工作目录
+WORKDIR /app
+
+# 安装运行时依赖
 RUN apk add --no-cache \
     ca-certificates \
-    tzdata \
     curl \
     wget \
     bash \
-    && update-ca-certificates \
-    && rm -rf /var/cache/apk/*
+    jq \
+    && update-ca-certificates
 
 # 创建非root用户
-RUN addgroup -g 1001 -S appuser && \
-    adduser -u 1001 -S appuser -G appuser
+RUN addgroup -g 1000 -S proxy && \
+    adduser -u 1000 -S proxy -G proxy
 
-# 创建应用目录
-RUN mkdir -p /app /tmp/tmp && chown -R appuser:appuser /app /tmp/tmp
+# 复制可执行文件
+COPY --from=builder --chown=proxy:proxy /app/proxy-server /app/
 
-# 切换工作目录
-WORKDIR /app
+# 复制配置文件（如果有）
+COPY --chown=proxy:proxy index.html /app/ 2>/dev/null || true
 
-# 从构建阶段复制可执行文件
-COPY --from=builder --chown=appuser:appuser /app/server /app/server
-
-# 复制可能的静态文件（如index.html）
-COPY --chown=appuser:appuser index.html /app/ 2>/dev/null || true
+# 创建必要的目录
+RUN mkdir -p /app/tmp && chown -R proxy:proxy /app/tmp
 
 # 切换用户
-USER appuser
+USER proxy
 
 # 暴露端口
-EXPOSE 7860
+EXPOSE 3000 7860 3001
 
+# 设置卷
+VOLUME ["/app/tmp"]
 
-# 启动应用
-ENTRYPOINT ["/app/server"]
+# 启动命令
+CMD ["/app/proxy-server"]

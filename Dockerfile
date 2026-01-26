@@ -1,65 +1,47 @@
-# 使用官方Go镜像进行构建
+# 使用官方 Go 镜像
 FROM golang:1.21-alpine AS builder
 
-# 安装必要的构建工具
-RUN apk add --no-cache git curl wget bash make gcc musl-dev ca-certificates
+# 安装必要的工具
+RUN apk add --no-cache git
 
 # 设置工作目录
 WORKDIR /app
 
-# 首先复制go.mod和go.sum文件
+# 设置环境变量
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GO111MODULE=on
+
+# 复制Go模块文件
 COPY go.mod go.sum ./
 
-# 下载Go模块依赖
+# 下载依赖（如果有）
 RUN go mod download
 
-# 复制所有源代码文件
-COPY *.go ./
+# 复制源代码和静态文件
+COPY main.go .
+COPY index.html ./
 
-# 构建Go应用
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o app
+# 编译应用（静态链接，减少依赖）
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o app .
 
-# 创建必要的目录
-RUN mkdir -p /app/tmp && chmod -R 755 /app/tmp
-
-# 最终运行时镜像 - 使用更小的基础镜像
-FROM alpine:3.18
+# 使用最小化的运行时镜像
+FROM alpine:latest
 
 # 安装必要的运行时工具
-RUN apk add --no-cache \
-    ca-certificates \
-    bash \
-    curl \
-    wget \
-    busybox-extras \
-    libc6-compat \
-    && rm -rf /var/cache/apk/*
-
-# 创建非root用户
-RUN addgroup -g 1001 -S appuser \
-    && adduser -S appuser -u 1001 -G appuser
+RUN apk --no-cache add ca-certificates bash curl
 
 # 设置工作目录
-WORKDIR /app
+WORKDIR /root/
 
-# 从构建阶段复制可执行文件和必要的文件
-COPY --from=builder --chown=appuser:appuser /app/app ./
-COPY --from=builder --chown=appuser:appuser /app/index.html ./
+# 从构建阶段复制可执行文件和静态文件
+COPY --from=builder /app/app .
+COPY --from=builder /app/index.html ./
 
-# 创建必要的目录并设置权限
-RUN mkdir -p /app/tmp \
-    && chown -R appuser:appuser /app \
-    && chmod -R 755 /app \
-    && chmod +x /app/app
-
-# 切换到非root用户
-USER appuser
+# 创建必要的目录
+RUN mkdir -p /tmp
 
 # 暴露端口
 EXPOSE 7860
-
-# 设置环境变量
-ENV TZ=UTC
 
 # 运行应用
 CMD ["./app"]

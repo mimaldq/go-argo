@@ -1,6 +1,6 @@
 Go Argo - 高性能代理服务器
 
-https://github.com/mimaldq/go-argo/actions/workflows/docker.yml/badge.svg
+https://github.com/mimaldq/go-argo/actions/workflows/docker.yml
 https://img.shields.io/badge/license-MIT-blue.svg
 https://img.shields.io/badge/go-1.21+-blue.svg
 https://img.shields.io/badge/docker-ready-blue.svg

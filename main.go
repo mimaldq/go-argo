@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -68,6 +69,7 @@ var (
 	tunnelYamlPath  string
 	monitorProcess  *exec.Cmd
 	monitorMutex    sync.Mutex
+	xrayProxy       *httputil.ReverseProxy
 	httpProxy       *httputil.ReverseProxy
 )
 
@@ -150,67 +152,48 @@ func getEnvBool(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
-// 主处理函数
-func mainHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" && r.URL.Path == "/" {
-		// 检查index.html是否存在
-		if _, err := os.Stat("index.html"); err == nil {
-			http.ServeFile(w, r, "index.html")
-		} else {
-			fmt.Fprint(w, "Hello world!")
-		}
-		return
-	}
-
-	if r.Method == "GET" && r.URL.Path == "/"+config.SubPath {
-		// 提供订阅
-		if data, err := os.ReadFile(subPath); err == nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.Write(data)
-		} else {
-			http.NotFound(w, r)
-		}
-		return
-	}
-
-	// 代理处理
-	proxyHandler(w, r)
-}
-
-// 代理处理器
+// HTTP代理处理函数 - 修复的核心功能
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
-
-	if strings.HasPrefix(urlPath, "/vless-argo") ||
-		strings.HasPrefix(urlPath, "/vmess-argo") ||
-		strings.HasPrefix(urlPath, "/trojan-argo") ||
-		urlPath == "/vless" ||
-		urlPath == "/vmess" ||
-		urlPath == "/trojan" {
-		// 转发到Xray
-		if httpProxy == nil {
+	
+	// 匹配Node.js的逻辑
+	if strings.HasPrefix(urlPath, "/vless-argo") || 
+	   strings.HasPrefix(urlPath, "/vmess-argo") || 
+	   strings.HasPrefix(urlPath, "/trojan-argo") ||
+	   urlPath == "/vless" || 
+	   urlPath == "/vmess" || 
+	   urlPath == "/trojan" {
+		// 转发到Xray端口（3001） - 与Node.js一致
+		if xrayProxy == nil {
 			xrayURL, _ := url.Parse("http://localhost:3001")
-			httpProxy = httputil.NewSingleHostReverseProxy(xrayURL)
+			xrayProxy = httputil.NewSingleHostReverseProxy(xrayURL)
+			xrayProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+				log.Printf("Xray代理错误: %v", err)
+				http.Error(w, "Xray代理错误", http.StatusInternalServerError)
+			}
+		}
+		xrayProxy.ServeHTTP(w, r)
+	} else {
+		// 转发到HTTP服务器端口
+		if httpProxy == nil {
+			httpURL, _ := url.Parse("http://localhost:" + config.Port)
+			httpProxy = httputil.NewSingleHostReverseProxy(httpURL)
+			httpProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+				log.Printf("HTTP代理错误: %v", err)
+				http.Error(w, "HTTP代理错误", http.StatusInternalServerError)
+			}
 		}
 		httpProxy.ServeHTTP(w, r)
-	} else {
-		// 转发到HTTP服务器
-		director := func(req *http.Request) {
-			req.URL.Scheme = "http"
-			req.URL.Host = "localhost:" + config.Port
-		}
-		proxy := &httputil.ReverseProxy{Director: director}
-		proxy.ServeHTTP(w, r)
 	}
 }
 
-// WebSocket处理器
-func wsHandler(w http.ResponseWriter, r *http.Request) {
+// WebSocket代理处理器
+func wsProxyHandler(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
-
-	if strings.HasPrefix(urlPath, "/vless-argo") ||
-		strings.HasPrefix(urlPath, "/vmess-argo") ||
-		strings.HasPrefix(urlPath, "/trojan-argo") {
+	
+	if strings.HasPrefix(urlPath, "/vless-argo") || 
+	   strings.HasPrefix(urlPath, "/vmess-argo") || 
+	   strings.HasPrefix(urlPath, "/trojan-argo") {
 		// 转发到Xray的WebSocket
 		director := func(req *http.Request) {
 			req.URL.Scheme = "http"
@@ -229,44 +212,74 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// 主HTTP处理函数
+func mainHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" && r.URL.Path == "/" {
+		// 检查index.html是否存在
+		if _, err := os.Stat("index.html"); err == nil {
+			http.ServeFile(w, r, "index.html")
+		} else {
+			fmt.Fprint(w, "Hello world!")
+		}
+		return
+	}
+	
+	if r.Method == "GET" && r.URL.Path == "/"+config.SubPath {
+		// 提供订阅
+		if data, err := os.ReadFile(subPath); err == nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Write(data)
+		} else {
+			http.NotFound(w, r)
+		}
+		return
+	}
+	
+	// 其他请求处理
+	http.NotFound(w, r)
+}
+
 // 删除历史节点
 func deleteNodes() {
 	if config.UploadURL == "" {
 		return
 	}
-
+	
 	if _, err := os.Stat(subPath); os.IsNotExist(err) {
 		return
 	}
-
+	
 	content, err := os.ReadFile(subPath)
 	if err != nil {
 		return
 	}
-
+	
 	decoded, err := base64.StdEncoding.DecodeString(string(content))
 	if err != nil {
 		return
 	}
-
+	
 	lines := strings.Split(string(decoded), "\n")
 	var nodes []string
 	for _, line := range lines {
 		if strings.Contains(line, "vless://") || strings.Contains(line, "vmess://") ||
-			strings.Contains(line, "trojan://") || strings.Contains(line, "hysteria2://") ||
-			strings.Contains(line, "tuic://") {
+		   strings.Contains(line, "trojan://") || strings.Contains(line, "hysteria2://") ||
+		   strings.Contains(line, "tuic://") {
 			nodes = append(nodes, line)
 		}
 	}
-
+	
 	if len(nodes) == 0 {
 		return
 	}
-
+	
 	payload := map[string][]string{"nodes": nodes}
 	jsonData, _ := json.Marshal(payload)
-
-	http.Post(config.UploadURL+"/api/delete-nodes", "application/json", bytes.NewBuffer(jsonData))
+	
+	// 异步发送，不等待响应
+	go func() {
+		http.Post(config.UploadURL+"/api/delete-nodes", "application/json", bytes.NewBuffer(jsonData))
+	}()
 }
 
 // 清理旧文件
@@ -275,7 +288,7 @@ func cleanupOldFiles() {
 	if err != nil {
 		return
 	}
-
+	
 	for _, file := range files {
 		filePath := filepath.Join(filePath, file.Name())
 		os.Remove(filePath)
@@ -284,7 +297,7 @@ func cleanupOldFiles() {
 
 // 生成Xray配置文件
 func generateConfig() error {
-	config := map[string]interface{}{
+	configData := map[string]interface{}{
 		"log": map[string]string{
 			"access":   "/dev/null",
 			"error":    "/dev/null",
@@ -420,12 +433,12 @@ func generateConfig() error {
 			"domainStrategy": "IPIfNonMatch",
 		},
 	}
-
-	jsonData, err := json.MarshalIndent(config, "", "  ")
+	
+	jsonData, err := json.MarshalIndent(configData, "", "  ")
 	if err != nil {
 		return err
 	}
-
+	
 	return os.WriteFile(configPath, jsonData, 0644)
 }
 
@@ -445,23 +458,23 @@ func downloadFile(filePath, fileURL string) error {
 		return err
 	}
 	defer resp.Body.Close()
-
+	
 	out, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-
+	
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
 		os.Remove(filePath)
 		return err
 	}
-
+	
 	if err := os.Chmod(filePath, 0755); err != nil {
 		return err
 	}
-
+	
 	log.Printf("下载 %s 成功", filepath.Base(filePath))
 	return nil
 }
@@ -475,7 +488,7 @@ func getFilesForArchitecture(architecture string) []struct {
 		fileName string
 		fileURL  string
 	}
-
+	
 	if architecture == "arm" {
 		files = []struct {
 			fileName string
@@ -493,7 +506,7 @@ func getFilesForArchitecture(architecture string) []struct {
 			{botPath, "https://amd64.ssss.nyc.mn/bot"},
 		}
 	}
-
+	
 	if config.NezhaServer != "" && config.NezhaKey != "" {
 		if config.NezhaPort != "" {
 			var npmURL string
@@ -519,7 +532,7 @@ func getFilesForArchitecture(architecture string) []struct {
 			}{{phpPath, phpURL}}, files...)
 		}
 	}
-
+	
 	return files
 }
 
@@ -527,11 +540,11 @@ func getFilesForArchitecture(architecture string) []struct {
 func downloadFilesAndRun() error {
 	architecture := getSystemArchitecture()
 	files := getFilesForArchitecture(architecture)
-
+	
 	if len(files) == 0 {
 		return fmt.Errorf("无法找到适合当前架构的文件")
 	}
-
+	
 	// 下载文件
 	for _, file := range files {
 		if err := downloadFile(file.fileName, file.fileURL); err != nil {
@@ -539,12 +552,61 @@ func downloadFilesAndRun() error {
 			continue
 		}
 	}
-
+	
 	// 运行哪吒监控
 	if config.NezhaServer != "" && config.NezhaKey != "" {
 		if config.NezhaPort == "" {
-			// 哪吒v1 - 简化处理
-			cmd := exec.Command(phpPath)
+			// 哪吒v1
+			port := ""
+			parts := strings.Split(config.NezhaServer, ":")
+			if len(parts) > 1 {
+				port = parts[1]
+			}
+			
+			tlsPorts := map[string]bool{
+				"443":  true,
+				"8443": true,
+				"2096": true,
+				"2087": true,
+				"2083": true,
+				"2053": true,
+			}
+			
+			nezhatls := "false"
+			if tlsPorts[port] {
+				nezhatls = "true"
+			}
+			
+			// 生成 config.yaml
+			configYaml := fmt.Sprintf(`
+client_secret: %s
+debug: false
+disable_auto_update: true
+disable_command_execute: false
+disable_force_update: true
+disable_nat: false
+disable_send_query: false
+gpu: false
+insecure_tls: true
+ip_report_period: 1800
+report_delay: 4
+server: %s
+skip_connection_count: true
+skip_procs_count: true
+temperature: false
+tls: %s
+use_gitee_to_upgrade: false
+use_ipv6_country_code: false
+uuid: %s
+`, config.NezhaKey, config.NezhaServer, nezhatls, config.UUID)
+			
+			yamlPath := filepath.Join(filePath, "config.yaml")
+			if err := os.WriteFile(yamlPath, []byte(configYaml), 0644); err != nil {
+				log.Printf("写入哪吒配置失败: %v", err)
+			}
+			
+			// 运行哪吒v1
+			cmd := exec.Command(phpPath, "-c", yamlPath)
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
 				log.Printf("运行哪吒v1失败: %v", err)
@@ -552,14 +614,25 @@ func downloadFilesAndRun() error {
 				log.Printf("%s 运行中", phpName)
 				go cmd.Wait()
 			}
+			
+			time.Sleep(1 * time.Second)
 		} else {
 			// 哪吒v0
 			args := []string{
 				"-s", fmt.Sprintf("%s:%s", config.NezhaServer, config.NezhaPort),
 				"-p", config.NezhaKey,
-				"--disable-auto-update", "--report-delay", "4", "--skip-conn", "--skip-procs",
 			}
-
+			
+			tlsPorts := []string{"443", "8443", "2096", "2087", "2083", "2053"}
+			for _, port := range tlsPorts {
+				if port == config.NezhaPort {
+					args = append(args, "--tls")
+					break
+				}
+			}
+			
+			args = append(args, "--disable-auto-update", "--report-delay", "4", "--skip-conn", "--skip-procs")
+			
 			cmd := exec.Command(npmPath, args...)
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
@@ -568,12 +641,13 @@ func downloadFilesAndRun() error {
 				log.Printf("%s 运行中", npmName)
 				go cmd.Wait()
 			}
+			
+			time.Sleep(1 * time.Second)
 		}
-		time.Sleep(1 * time.Second)
 	} else {
 		log.Println("哪吒监控变量为空，跳过运行")
 	}
-
+	
 	// 运行Xray
 	cmd := exec.Command(webPath, "-c", configPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -583,25 +657,34 @@ func downloadFilesAndRun() error {
 		log.Printf("%s 运行中", webName)
 		go cmd.Wait()
 	}
-
+	
 	time.Sleep(1 * time.Second)
-
+	
 	// 运行cloudflared
 	if _, err := os.Stat(botPath); err == nil {
 		var args []string
-
+		
+		// 与Node.js逻辑保持一致
 		if config.ArgoAuth != "" && len(config.ArgoAuth) >= 120 && len(config.ArgoAuth) <= 250 &&
-			strings.Contains(config.ArgoAuth, "=") {
+		   strings.Contains(config.ArgoAuth, "=") {
 			// Token认证
 			args = []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
 				"--protocol", "http2", "run", "--token", config.ArgoAuth}
+		} else if config.ArgoAuth != "" && strings.Contains(config.ArgoAuth, "TunnelSecret") {
+			// 隧道配置文件
+			if _, err := os.Stat(tunnelYamlPath); os.IsNotExist(err) {
+				log.Println("等待隧道配置文件生成...")
+				time.Sleep(1 * time.Second)
+			}
+			args = []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
+				"--protocol", "http2", "--config", tunnelYamlPath, "run"}
 		} else {
 			// 临时隧道
 			args = []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
 				"--protocol", "http2", "--logfile", bootLogPath, "--loglevel", "info",
 				"--url", fmt.Sprintf("http://localhost:%s", config.ArgoPort)}
 		}
-
+		
 		cmd := exec.Command(botPath, args...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
@@ -610,12 +693,12 @@ func downloadFilesAndRun() error {
 			log.Printf("%s 运行中", botName)
 			go cmd.Wait()
 		}
-
+		
 		// 等待隧道启动
 		log.Println("等待隧道启动...")
 		time.Sleep(5 * time.Second)
 	}
-
+	
 	time.Sleep(2 * time.Second)
 	return nil
 }
@@ -626,27 +709,48 @@ func argoType() {
 		log.Println("ARGO_DOMAIN 或 ARGO_AUTH 为空，使用快速隧道")
 		return
 	}
-
+	
 	if strings.Contains(config.ArgoAuth, "TunnelSecret") {
 		if err := os.WriteFile(tunnelJsonPath, []byte(config.ArgoAuth), 0644); err != nil {
 			log.Printf("写入隧道JSON配置失败: %v", err)
 			return
 		}
-
-		// 简化处理，不解析JSON
+		
+		// 解析JSON获取TunnelID
+		var tunnelConfig map[string]interface{}
+		if err := json.Unmarshal([]byte(config.ArgoAuth), &tunnelConfig); err != nil {
+			log.Printf("解析隧道配置失败: %v", err)
+			return
+		}
+		
+		tunnelID, ok := tunnelConfig["TunnelID"].(string)
+		if !ok {
+			log.Println("隧道配置中缺少TunnelID")
+			return
+		}
+		
+		// 生成YAML配置
 		tunnelYaml := fmt.Sprintf(`
+tunnel: %s
 credentials-file: %s
 protocol: http2
-`, tunnelJsonPath)
 
+ingress:
+  - hostname: %s
+    service: http://localhost:%s
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404
+`, tunnelID, tunnelJsonPath, config.ArgoDomain, config.ArgoPort)
+		
 		if err := os.WriteFile(tunnelYamlPath, []byte(tunnelYaml), 0644); err != nil {
 			log.Printf("写入隧道YAML配置失败: %v", err)
 			return
 		}
-
-		log.Println("隧道配置生成成功")
+		
+		log.Println("隧道YAML配置生成成功")
 	} else {
-		log.Println("使用token连接隧道")
+		log.Println("ARGO_AUTH 不是TunnelSecret格式，使用token连接隧道")
 	}
 }
 
@@ -656,28 +760,28 @@ func downloadMonitorScript() bool {
 		log.Println("监控环境变量不完整，跳过监控脚本启动")
 		return false
 	}
-
+	
 	monitorURL := "https://raw.githubusercontent.com/mimaldq/cf-vps-monitor/main/cf-vps-monitor.sh"
 	log.Printf("从 %s 下载监控脚本", monitorURL)
-
+	
 	resp, err := http.Get(monitorURL)
 	if err != nil {
 		log.Printf("下载监控脚本失败: %v", err)
 		return false
 	}
 	defer resp.Body.Close()
-
+	
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("读取监控脚本失败: %v", err)
 		return false
 	}
-
+	
 	if err := os.WriteFile(monitorPath, data, 0755); err != nil {
 		log.Printf("保存监控脚本失败: %v", err)
 		return false
 	}
-
+	
 	log.Println("监控脚本下载完成")
 	return true
 }
@@ -687,22 +791,22 @@ func runMonitorScript() {
 	if config.MonitorKey == "" || config.MonitorServer == "" || config.MonitorURL == "" {
 		return
 	}
-
+	
 	monitorMutex.Lock()
 	defer monitorMutex.Unlock()
-
+	
 	args := []string{
 		"-i",
 		"-k", config.MonitorKey,
 		"-s", config.MonitorServer,
 		"-u", config.MonitorURL,
 	}
-
+	
 	log.Printf("运行监控脚本: %s %s", monitorPath, strings.Join(args, " "))
-
+	
 	cmd := exec.Command(monitorPath, args...)
 	monitorProcess = cmd
-
+	
 	go func() {
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -714,7 +818,7 @@ func runMonitorScript() {
 			log.Printf("监控脚本输出: %s", output)
 		}
 	}()
-
+	
 	if err := cmd.Start(); err != nil {
 		log.Printf("启动监控脚本失败: %v", err)
 		return
@@ -727,10 +831,10 @@ func startMonitorScript() {
 		log.Println("监控脚本未配置，跳过")
 		return
 	}
-
+	
 	// 等待其他服务启动
 	time.Sleep(10 * time.Second)
-
+	
 	if downloaded := downloadMonitorScript(); downloaded {
 		runMonitorScript()
 	}
@@ -739,27 +843,37 @@ func startMonitorScript() {
 // 提取临时隧道域名
 func extractDomains() error {
 	var argoDomain string
-
+	
 	if config.ArgoAuth != "" && config.ArgoDomain != "" {
 		argoDomain = config.ArgoDomain
 		log.Printf("使用固定域名: %s", argoDomain)
 		return generateLinks(argoDomain)
 	}
-
+	
 	// 读取日志文件获取临时域名
 	data, err := os.ReadFile(bootLogPath)
 	if err != nil {
 		return err
 	}
-
+	
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
 		if strings.Contains(line, "trycloudflare.com") {
-			// 简化域名提取
-			parts := strings.Split(line, " ")
-			for _, part := range parts {
-				if strings.Contains(part, "trycloudflare.com") {
-					argoDomain = strings.TrimPrefix(part, "https://")
+			// 使用正则表达式提取域名
+			start := strings.Index(line, "https://")
+			if start == -1 {
+				start = strings.Index(line, "http://")
+			}
+			if start != -1 {
+				line = line[start:]
+				end := strings.Index(line, " ")
+				if end == -1 {
+					end = len(line)
+				}
+				domain := line[:end]
+				if strings.Contains(domain, "trycloudflare.com") {
+					argoDomain = strings.TrimPrefix(domain, "https://")
+					argoDomain = strings.TrimPrefix(argoDomain, "http://")
 					argoDomain = strings.TrimSuffix(argoDomain, "/")
 					log.Printf("找到临时域名: %s", argoDomain)
 					return generateLinks(argoDomain)
@@ -767,29 +881,75 @@ func extractDomains() error {
 			}
 		}
 	}
+	
+	log.Println("未找到域名，重新运行bot以获取Argo域名")
+	os.Remove(bootLogPath)
+	
+	// 停止现有的cloudflared进程
+	killBotProcess()
+	time.Sleep(3 * time.Second)
+	
+	// 重新启动cloudflared
+	args := []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
+		"--protocol", "http2", "--logfile", bootLogPath, "--loglevel", "info",
+		"--url", fmt.Sprintf("http://localhost:%s", config.ArgoPort)}
+	
+	cmd := exec.Command(botPath, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait()
+	
+	log.Printf("%s 重新运行中", botName)
+	time.Sleep(3 * time.Second)
+	
+	return extractDomains()
+}
 
-	log.Println("未找到域名")
-	return fmt.Errorf("未找到域名")
+// 杀死bot进程
+func killBotProcess() {
+	if runtime.GOOS == "windows" {
+		exec.Command("taskkill", "/f", "/im", botName+".exe").Run()
+	} else {
+		exec.Command("pkill", "-f", botName).Run()
+	}
 }
 
 // 获取ISP信息
 func getMetaInfo() string {
 	client := &http.Client{Timeout: 3 * time.Second}
-
-	// 尝试获取IP信息
-	resp, err := client.Get("https://ipinfo.io/json")
+	
+	// 尝试第一个API
+	resp, err := client.Get("https://ipapi.co/json/")
 	if err == nil {
 		defer resp.Body.Close()
 		var data map[string]interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&data); err == nil {
-			if country, ok := data["country"].(string); ok {
+			if countryCode, ok := data["country_code"].(string); ok {
 				if org, ok := data["org"].(string); ok {
-					return fmt.Sprintf("%s_%s", country, org)
+					return fmt.Sprintf("%s_%s", countryCode, org)
 				}
 			}
 		}
 	}
-
+	
+	// 尝试第二个API
+	resp, err = client.Get("http://ip-api.com/json/")
+	if err == nil {
+		defer resp.Body.Close()
+		var data map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&data); err == nil {
+			if status, ok := data["status"].(string); ok && status == "success" {
+				if countryCode, ok := data["countryCode"].(string); ok {
+					if org, ok := data["org"].(string); ok {
+						return fmt.Sprintf("%s_%s", countryCode, org)
+					}
+				}
+			}
+		}
+	}
+	
 	return "Unknown"
 }
 
@@ -800,7 +960,10 @@ func generateLinks(argoDomain string) error {
 	if config.Name != "" {
 		nodeName = fmt.Sprintf("%s-%s", config.Name, isp)
 	}
-
+	
+	// URL编码路径，与Node.js一致
+	encodedPath := "%2Fvless-argo%3Fed%3D2560"
+	
 	// 生成VMESS配置
 	vmessConfig := map[string]interface{}{
 		"v":    "2",
@@ -819,34 +982,34 @@ func generateLinks(argoDomain string) error {
 		"alpn": "",
 		"fp":   "firefox",
 	}
-
+	
 	vmessJSON, _ := json.Marshal(vmessConfig)
 	vmessBase64 := base64.StdEncoding.EncodeToString(vmessJSON)
-
-	// 生成订阅文本
+	
+	// 生成订阅文本，与Node.js格式一致
 	subTxt := fmt.Sprintf(`
-vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=firefox&type=ws&host=%s&path=/vless-argo?ed=2560#%s
+vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=firefox&type=ws&host=%s&path=%s#%s
 
 vmess://%s
 
-trojan://%s@%s:%s?security=tls&sni=%s&fp=firefox&type=ws&host=%s&path=/trojan-argo?ed=2560#%s
-`, config.UUID, config.CFIP, config.CFPort, argoDomain, argoDomain, nodeName,
-		vmessBase64, config.UUID, config.CFIP, config.CFPort, argoDomain, argoDomain, nodeName)
-
-	// 打印到控制台
+trojan://%s@%s:%s?security=tls&sni=%s&fp=firefox&type=ws&host=%s&path=%s#%s
+`, config.UUID, config.CFIP, config.CFPort, argoDomain, argoDomain, encodedPath, nodeName,
+		vmessBase64, config.UUID, config.CFIP, config.CFPort, argoDomain, argoDomain, encodedPath, nodeName)
+	
+	// 打印到控制台（base64编码）
 	encoded := base64.StdEncoding.EncodeToString([]byte(subTxt))
 	log.Println(encoded)
-
+	
 	// 保存文件
 	if err := os.WriteFile(subPath, []byte(encoded), 0644); err != nil {
 		return err
 	}
-
+	
 	log.Printf("%s/sub.txt 保存成功", filePath)
-
+	
 	// 上传节点
 	go uploadNodes()
-
+	
 	return nil
 }
 
@@ -855,16 +1018,16 @@ func uploadNodes() {
 	if config.UploadURL == "" {
 		return
 	}
-
+	
 	if config.ProjectURL != "" {
 		// 上传订阅
 		subscriptionUrl := fmt.Sprintf("%s/%s", config.ProjectURL, config.SubPath)
 		payload := map[string][]string{
 			"subscription": {subscriptionUrl},
 		}
-
+		
 		jsonData, _ := json.Marshal(payload)
-
+		
 		resp, err := http.Post(config.UploadURL+"/api/add-subscriptions",
 			"application/json", bytes.NewBuffer(jsonData))
 		if err == nil && resp.StatusCode == 200 {
@@ -877,6 +1040,33 @@ func uploadNodes() {
 		if _, err := os.Stat(listPath); os.IsNotExist(err) {
 			return
 		}
+		
+		data, err := os.ReadFile(listPath)
+		if err != nil {
+			return
+		}
+		
+		lines := strings.Split(string(data), "\n")
+		var nodes []string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "vless://") || strings.HasPrefix(line, "vmess://") ||
+			   strings.HasPrefix(line, "trojan://") || strings.HasPrefix(line, "hysteria2://") ||
+			   strings.HasPrefix(line, "tuic://") {
+				nodes = append(nodes, line)
+			}
+		}
+		
+		if len(nodes) == 0 {
+			return
+		}
+		
+		payload := map[string][]string{"nodes": nodes}
+		jsonData, _ := json.Marshal(payload)
+		
+		// 异步发送
+		go func() {
+			http.Post(config.UploadURL+"/api/add-nodes", "application/json", bytes.NewBuffer(jsonData))
+		}()
 	}
 }
 
@@ -886,17 +1076,17 @@ func cleanFiles() {
 		filesToDelete := []string{
 			bootLogPath, configPath, webPath, botPath, monitorPath,
 		}
-
+		
 		if config.NezhaPort != "" {
 			filesToDelete = append(filesToDelete, npmPath)
 		} else if config.NezhaServer != "" && config.NezhaKey != "" {
 			filesToDelete = append(filesToDelete, phpPath)
 		}
-
+		
 		for _, file := range filesToDelete {
 			os.Remove(file)
 		}
-
+		
 		log.Println("应用正在运行")
 		log.Println("感谢使用此脚本，享受吧！")
 	})
@@ -908,10 +1098,10 @@ func addVisitTask() {
 		log.Println("跳过添加自动访问任务")
 		return
 	}
-
+	
 	payload := map[string]string{"url": config.ProjectURL}
 	jsonData, _ := json.Marshal(payload)
-
+	
 	resp, err := http.Post("https://oooo.serv00.net/add-url",
 		"application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -919,36 +1109,36 @@ func addVisitTask() {
 		return
 	}
 	defer resp.Body.Close()
-
+	
 	log.Println("自动访问任务添加成功")
 }
 
 // 主运行逻辑
 func startServer() {
 	log.Println("开始服务器初始化...")
-
+	
 	deleteNodes()
 	cleanupOldFiles()
-
+	
 	argoType()
-
+	
 	if err := generateConfig(); err != nil {
 		log.Printf("生成配置文件失败: %v", err)
 		return
 	}
-
+	
 	if err := downloadFilesAndRun(); err != nil {
 		log.Printf("下载并运行文件失败: %v", err)
 		return
 	}
-
+	
 	log.Println("等待隧道启动...")
 	time.Sleep(5 * time.Second)
-
+	
 	if err := extractDomains(); err != nil {
 		log.Printf("提取域名失败: %v", err)
 	}
-
+	
 	addVisitTask()
 	log.Println("服务器初始化完成")
 }
@@ -956,30 +1146,32 @@ func startServer() {
 func main() {
 	// 初始化配置
 	initConfig()
-
-	// 创建HTTP服务器
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", mainHandler)
-
-	// 创建内部HTTP服务器
+	
+	// 创建主HTTP服务器（内部端口）
+	httpMux := http.NewServeMux()
+	httpMux.HandleFunc("/", mainHandler)
+	
 	internalServer := &http.Server{
 		Addr:    ":" + config.Port,
-		Handler: mux,
+		Handler: httpMux,
 	}
-
-	// 创建外部代理服务器
+	
+	// 创建代理服务器（外部端口） - 与Node.js逻辑一致
+	proxyMux := http.NewServeMux()
+	proxyMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// WebSocket升级处理
+		if r.Header.Get("Upgrade") == "websocket" {
+			wsProxyHandler(w, r)
+		} else {
+			proxyHandler(w, r)
+		}
+	})
+	
 	proxyServer := &http.Server{
-		Addr: ":" + config.ArgoPort,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// WebSocket升级处理
-			if r.Header.Get("Upgrade") == "websocket" {
-				wsHandler(w, r)
-			} else {
-				mainHandler(w, r)
-			}
-		}),
+		Addr:    ":" + config.ArgoPort,
+		Handler: proxyMux,
 	}
-
+	
 	// 启动内部HTTP服务器
 	go func() {
 		log.Printf("HTTP服务运行在内部端口: %s", config.Port)
@@ -987,46 +1179,46 @@ func main() {
 			log.Fatalf("HTTP服务器错误: %v", err)
 		}
 	}()
-
-	// 启动外部代理服务器
+	
+	// 启动代理服务器
 	go func() {
 		log.Printf("代理服务器启动在端口: %s", config.ArgoPort)
 		log.Printf("HTTP流量 -> localhost:%s", config.Port)
 		log.Printf("Xray流量 -> localhost:3001")
-
+		
 		if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("代理服务器错误: %v", err)
 		}
 	}()
-
+	
 	// 启动主流程
 	go startServer()
-
+	
 	// 启动监控脚本
 	go startMonitorScript()
-
+	
 	// 清理文件
 	cleanFiles()
-
+	
 	// 等待终止信号
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
+	
 	<-sigChan
 	log.Println("收到关闭信号，正在清理...")
-
+	
 	// 停止监控脚本
 	if monitorProcess != nil {
 		log.Println("停止监控脚本...")
 		monitorProcess.Process.Kill()
 	}
-
+	
 	// 优雅关闭服务器
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
+	
 	internalServer.Shutdown(ctx)
 	proxyServer.Shutdown(ctx)
-
+	
 	log.Println("程序退出")
 }

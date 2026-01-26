@@ -61,10 +61,6 @@ USER appuser
 # 暴露端口
 EXPOSE 7860
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:3000/ || exit 1
-
 # 设置环境变量
 ENV TZ=UTC
 

@@ -151,18 +151,17 @@ func getEnvBool(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
-// HTTP代理处理函数 - 修复的核心功能
+// HTTP代理处理函数
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
 	
-	// 匹配Node.js的逻辑
 	if strings.HasPrefix(urlPath, "/vless-argo") || 
 	   strings.HasPrefix(urlPath, "/vmess-argo") || 
 	   strings.HasPrefix(urlPath, "/trojan-argo") ||
 	   urlPath == "/vless" || 
 	   urlPath == "/vmess" || 
 	   urlPath == "/trojan" {
-		// 转发到Xray端口（3001） - 与Node.js一致
+		// 转发到Xray端口（3001）
 		if xrayProxy == nil {
 			xrayURL, _ := url.Parse("http://localhost:3001")
 			xrayProxy = httputil.NewSingleHostReverseProxy(xrayURL)
@@ -275,7 +274,6 @@ func deleteNodes() {
 	payload := map[string][]string{"nodes": nodes}
 	jsonData, _ := json.Marshal(payload)
 	
-	// 异步发送，不等待响应
 	go func() {
 		http.Post(config.UploadURL+"/api/delete-nodes", "application/json", bytes.NewBuffer(jsonData))
 	}()
@@ -663,7 +661,6 @@ uuid: %s
 	if _, err := os.Stat(botPath); err == nil {
 		var args []string
 		
-		// 与Node.js逻辑保持一致
 		if config.ArgoAuth != "" && len(config.ArgoAuth) >= 120 && len(config.ArgoAuth) <= 250 &&
 		   strings.Contains(config.ArgoAuth, "=") {
 			// Token认证
@@ -693,7 +690,6 @@ uuid: %s
 			go cmd.Wait()
 		}
 		
-		// 等待隧道启动
 		log.Println("等待隧道启动...")
 		time.Sleep(5 * time.Second)
 	}
@@ -715,7 +711,6 @@ func argoType() {
 			return
 		}
 		
-		// 解析JSON获取TunnelID
 		var tunnelConfig map[string]interface{}
 		if err := json.Unmarshal([]byte(config.ArgoAuth), &tunnelConfig); err != nil {
 			log.Printf("解析隧道配置失败: %v", err)
@@ -728,7 +723,6 @@ func argoType() {
 			return
 		}
 		
-		// 生成YAML配置
 		tunnelYaml := fmt.Sprintf(`
 tunnel: %s
 credentials-file: %s
@@ -831,7 +825,6 @@ func startMonitorScript() {
 		return
 	}
 	
-	// 等待其他服务启动
 	time.Sleep(10 * time.Second)
 	
 	if downloaded := downloadMonitorScript(); downloaded {
@@ -849,7 +842,6 @@ func extractDomains() error {
 		return generateLinks(argoDomain)
 	}
 	
-	// 读取日志文件获取临时域名
 	data, err := os.ReadFile(bootLogPath)
 	if err != nil {
 		return err
@@ -858,7 +850,6 @@ func extractDomains() error {
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
 		if strings.Contains(line, "trycloudflare.com") {
-			// 使用正则表达式提取域名
 			start := strings.Index(line, "https://")
 			if start == -1 {
 				start = strings.Index(line, "http://")
@@ -884,11 +875,9 @@ func extractDomains() error {
 	log.Println("未找到域名，重新运行bot以获取Argo域名")
 	os.Remove(bootLogPath)
 	
-	// 停止现有的cloudflared进程
 	killBotProcess()
 	time.Sleep(3 * time.Second)
 	
-	// 重新启动cloudflared
 	args := []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
 		"--protocol", "http2", "--logfile", bootLogPath, "--loglevel", "info",
 		"--url", fmt.Sprintf("http://localhost:%s", config.ArgoPort)}
@@ -919,7 +908,6 @@ func killBotProcess() {
 func getMetaInfo() string {
 	client := &http.Client{Timeout: 3 * time.Second}
 	
-	// 尝试第一个API
 	resp, err := client.Get("https://ipapi.co/json/")
 	if err == nil {
 		defer resp.Body.Close()
@@ -933,7 +921,6 @@ func getMetaInfo() string {
 		}
 	}
 	
-	// 尝试第二个API
 	resp, err = client.Get("http://ip-api.com/json/")
 	if err == nil {
 		defer resp.Body.Close()
@@ -960,10 +947,8 @@ func generateLinks(argoDomain string) error {
 		nodeName = fmt.Sprintf("%s-%s", config.Name, isp)
 	}
 	
-	// URL编码路径，与Node.js一致
 	encodedPath := "%2Fvless-argo%3Fed%3D2560"
 	
-	// 生成VMESS配置
 	vmessConfig := map[string]interface{}{
 		"v":    "2",
 		"ps":   nodeName,
@@ -985,7 +970,6 @@ func generateLinks(argoDomain string) error {
 	vmessJSON, _ := json.Marshal(vmessConfig)
 	vmessBase64 := base64.StdEncoding.EncodeToString(vmessJSON)
 	
-	// 生成订阅文本，与Node.js格式一致
 	subTxt := fmt.Sprintf(`
 vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=firefox&type=ws&host=%s&path=%s#%s
 
@@ -995,18 +979,15 @@ trojan://%s@%s:%s?security=tls&sni=%s&fp=firefox&type=ws&host=%s&path=%s#%s
 `, config.UUID, config.CFIP, config.CFPort, argoDomain, argoDomain, encodedPath, nodeName,
 		vmessBase64, config.UUID, config.CFIP, config.CFPort, argoDomain, argoDomain, encodedPath, nodeName)
 	
-	// 打印到控制台（base64编码）
 	encoded := base64.StdEncoding.EncodeToString([]byte(subTxt))
 	log.Println(encoded)
 	
-	// 保存文件
 	if err := os.WriteFile(subPath, []byte(encoded), 0644); err != nil {
 		return err
 	}
 	
 	log.Printf("%s/sub.txt 保存成功", filePath)
 	
-	// 上传节点
 	go uploadNodes()
 	
 	return nil
@@ -1019,7 +1000,6 @@ func uploadNodes() {
 	}
 	
 	if config.ProjectURL != "" {
-		// 上传订阅
 		subscriptionUrl := fmt.Sprintf("%s/%s", config.ProjectURL, config.SubPath)
 		payload := map[string][]string{
 			"subscription": {subscriptionUrl},
@@ -1035,7 +1015,6 @@ func uploadNodes() {
 			log.Printf("订阅上传失败: %v", err)
 		}
 	} else {
-		// 上传节点
 		if _, err := os.Stat(listPath); os.IsNotExist(err) {
 			return
 		}
@@ -1062,7 +1041,6 @@ func uploadNodes() {
 		payload := map[string][]string{"nodes": nodes}
 		jsonData, _ := json.Marshal(payload)
 		
-		// 异步发送
 		go func() {
 			http.Post(config.UploadURL+"/api/add-nodes", "application/json", bytes.NewBuffer(jsonData))
 		}()
@@ -1143,10 +1121,8 @@ func startServer() {
 }
 
 func main() {
-	// 初始化配置
 	initConfig()
 	
-	// 创建主HTTP服务器（内部端口）
 	httpMux := http.NewServeMux()
 	httpMux.HandleFunc("/", mainHandler)
 	
@@ -1155,10 +1131,8 @@ func main() {
 		Handler: httpMux,
 	}
 	
-	// 创建代理服务器（外部端口） - 与Node.js逻辑一致
 	proxyMux := http.NewServeMux()
 	proxyMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// WebSocket升级处理
 		if r.Header.Get("Upgrade") == "websocket" {
 			wsProxyHandler(w, r)
 		} else {
@@ -1171,7 +1145,6 @@ func main() {
 		Handler: proxyMux,
 	}
 	
-	// 启动内部HTTP服务器
 	go func() {
 		log.Printf("HTTP服务运行在内部端口: %s", config.Port)
 		if err := internalServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -1179,7 +1152,6 @@ func main() {
 		}
 	}()
 	
-	// 启动代理服务器
 	go func() {
 		log.Printf("代理服务器启动在端口: %s", config.ArgoPort)
 		log.Printf("HTTP流量 -> localhost:%s", config.Port)
@@ -1190,29 +1162,23 @@ func main() {
 		}
 	}()
 	
-	// 启动主流程
 	go startServer()
 	
-	// 启动监控脚本
 	go startMonitorScript()
 	
-	// 清理文件
 	cleanFiles()
 	
-	// 等待终止信号
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	
 	<-sigChan
 	log.Println("收到关闭信号，正在清理...")
 	
-	// 停止监控脚本
 	if monitorProcess != nil {
 		log.Println("停止监控脚本...")
 		monitorProcess.Process.Kill()
 	}
 	
-	// 优雅关闭服务器
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	

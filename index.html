@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Trade Organization - Global Trade Rules</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f8fafc;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        /* Header Styles */
+        header {
+            background: linear-gradient(135deg, #0056a6 0%, #0072ce 100%);
+            color: white;
+            padding: 25px 0;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .logo-area {
+            display: flex;
+            align-items: center;
+        }
+        
+        .logo-icon {
+            font-size: 2.8rem;
+            margin-right: 20px;
+            color: #ffcc00;
+        }
+        
+        .logo-text h1 {
+            font-size: 2.4rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .logo-text p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .wto-badge {
+            background-color: rgba(255, 255, 255, 0.15);
+            padding: 8px 15px;
+            border-radius: 30px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: inline-block;
+            margin-top: 5px;
+        }
+        
+        /* Navigation */
+        nav ul {
+            display: flex;
+            list-style: none;
+            flex-wrap: wrap;
+        }
+        
+        nav ul li {
+            margin-left: 20px;
+        }
+        
+        nav ul li a {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+            padding: 8px 15px;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+        
+        nav ul li a:hover, nav ul li a.active {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Hero Section */
+        .hero {
+            background-color: #e8f2fc;
+            padding: 60px 0;
+            margin-bottom: 40px;
+            border-radius: 0 0 15px 15px;
+        }
+        
+        .hero-content {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 40px;
+        }
+        
+        .hero-text {
+            flex: 1;
+            min-width: 300px;
+        }
+        
+        .hero-text h2 {
+            color: #0056a6;
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            line-height: 1.3;
+        }
+        
+        .hero-text p {
+            font-size: 1.2rem;
+            color: #444;
+            margin-bottom: 25px;
+        }
+        
+        .hero-image {
+            flex: 1;
+            min-width: 300px;
+        }
+        
+        .hero-image img {
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Main Content */
+        .content-section {
+            background-color: white;
+            border-radius: 10px;
+            padding: 40px;
+            margin-bottom: 40px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+        
+        .section-title {
+            color: #0056a6;
+            font-size: 2rem;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #ffcc00;
+            display: inline-block;
+        }
+        
+        .section-content {
+            font-size: 1.1rem;
+            color: #444;
+        }
+        
+        .section-content p {
+            margin-bottom: 20px;
+        }
+        
+        /* Info Cards */
+        .info-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 30px;
+            margin: 30px 0;
+        }
+        
+        .info-card {
+            background-color: #f0f7ff;
+            border-radius: 10px;
+            padding: 30px;
+            border-left: 5px solid #0056a6;
+            transition: transform 0.3s ease;
+        }
+        
+        .info-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .info-card h3 {
+            color: #0056a6;
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .info-card h3 i {
+            margin-right: 10px;
+            color: #ffcc00;
+        }
+        
+        /* Statistics */
+        .stats-container {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            margin: 40px 0;
+            gap: 20px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            padding: 25px 15px;
+            min-width: 200px;
+            background-color: #f0f7ff;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+        
+        .stat-number {
+            font-size: 3rem;
+            font-weight: 700;
+            color: #0056a6;
+            margin-bottom: 10px;
+        }
+        
+        .stat-label {
+            font-size: 1.1rem;
+            color: #555;
+            font-weight: 600;
+        }
+        
+        /* Timeline */
+        .timeline {
+            position: relative;
+            max-width: 900px;
+            margin: 40px auto;
+        }
+        
+        .timeline:before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 3px;
+            height: 100%;
+            background-color: #0056a6;
+        }
+        
+        .timeline-item {
+            margin-bottom: 40px;
+            position: relative;
+            width: 50%;
+            padding: 20px;
+        }
+        
+        .timeline-item:nth-child(odd) {
+            left: 0;
+        }
+        
+        .timeline-item:nth-child(even) {
+            left: 50%;
+        }
+        
+        .timeline-content {
+            background-color: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            border-left: 4px solid #ffcc00;
+        }
+        
+        .timeline-year {
+            font-weight: 700;
+            color: #0056a6;
+            font-size: 1.3rem;
+            margin-bottom: 10px;
+        }
+        
+        /* Principles List */
+        .principles-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .principle {
+            flex: 1;
+            min-width: 250px;
+            background-color: #f8fafc;
+            padding: 25px;
+            border-radius: 10px;
+            border-top: 4px solid #0056a6;
+        }
+        
+        .principle h4 {
+            color: #0056a6;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        
+        /* Footer */
+        footer {
+            background-color: #1a2b4c;
+            color: white;
+            padding: 50px 0 25px;
+        }
+        
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+        
+        .footer-section {
+            flex: 1;
+            min-width: 250px;
+            padding: 0 20px;
+            margin-bottom: 30px;
+        }
+        
+        .footer-section h3 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: #ffcc00;
+        }
+        
+        .footer-section p {
+            opacity: 0.8;
+            margin-bottom: 15px;
+        }
+        
+        .footer-links {
+            list-style: none;
+        }
+        
+        .footer-links li {
+            margin-bottom: 10px;
+        }
+        
+        .footer-links a {
+            color: white;
+            text-decoration: none;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+        }
+        
+        .footer-links a:hover {
+            opacity: 1;
+        }
+        
+        .social-icons {
+            display: flex;
+            margin-top: 20px;
+        }
+        
+        .social-icons a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-radius: 50%;
+            margin-right: 10px;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+        
+        .social-icons a:hover {
+            background-color: #0056a6;
+            transform: translateY(-3px);
+        }
+        
+        .copyright {
+            text-align: center;
+            padding-top: 25px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            opacity: 0.7;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 992px) {
+            .timeline:before {
+                left: 30px;
+            }
+            
+            .timeline-item {
+                width: 100%;
+                left: 0 !important;
+                padding-left: 70px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .logo-area {
+                margin-bottom: 20px;
+            }
+            
+            nav ul {
+                justify-content: center;
+            }
+            
+            nav ul li {
+                margin: 0 10px 10px;
+            }
+            
+            .hero-content {
+                flex-direction: column;
+            }
+            
+            .section-title {
+                font-size: 1.8rem;
+            }
+        }
+        
+        /* Back to top button */
+        .back-to-top {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background-color: #0056a6;
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            text-decoration: none;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+        
+        .back-to-top.visible {
+            opacity: 1;
+        }
+        
+        .back-to-top:hover {
+            background-color: #0072ce;
+            transform: translateY(-5px);
+        }
+    </style>
+</head>
+<body>
+    <!-- Header Section -->
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <div class="logo-area">
+                    <i class="fas fa-globe-americas logo-icon"></i>
+                    <div class="logo-text">
+                        <h1>World Trade Organization</h1>
+                        <p>Making global trade work for everyone</p>
+                        <div class="wto-badge">164 Member Countries</div>
+                    </div>
+                </div>
+                <nav>
+                    <ul>
+                        <li><a href="#home" class="active">Home</a></li>
+                        <li><a href="#about">About WTO</a></li>
+                        <li><a href="#functions">Functions</a></li>
+                        <li><a href="#history">History</a></li>
+                        <li><a href="#principles">Principles</a></li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero" id="home">
+        <div class="container">
+            <div class="hero-content">
+                <div class="hero-text">
+                    <h2>The World Trade Organization (WTO)</h2>
+                    <p>The WTO is the only global international organization dealing with the rules of trade between nations. At its heart are the WTO agreements, negotiated and signed by the bulk of the world's trading nations and ratified in their parliaments.</p>
+                    <p>The goal is to ensure that trade flows as smoothly, predictably and freely as possible, helping to raise standards of living, create jobs, and promote sustainable development worldwide.</p>
+                </div>
+                <div class="hero-image">
+                    <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1170&q=80" alt="WTO Headquarters in Geneva">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Content -->
+    <main class="container">
+        <!-- About WTO Section -->
+        <section class="content-section" id="about">
+            <h2 class="section-title">About the World Trade Organization</h2>
+            <div class="section-content">
+                <p>The World Trade Organization (WTO) is the only global international organization that deals with the rules of trade between nations. It was established on January 1, 1995, replacing the General Agreement on Tariffs and Trade (GATT) that had been in operation since 1948.</p>
+                
+                <p>The WTO's primary purpose is to open trade for the benefit of all. Its main functions include:</p>
+                
+                <div class="info-cards">
+                    <div class="info-card">
+                        <h3><i class="fas fa-balance-scale"></i> Administering Trade Agreements</h3>
+                        <p>The WTO administers the multilateral trade agreements that form the legal ground rules for international commerce.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3><i class="fas fa-handshake"></i> Forum for Trade Negotiations</h3>
+                        <p>It serves as a forum for negotiating agreements aimed at reducing obstacles to international trade.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3><i class="fas fa-gavel"></i> Dispute Settlement</h3>
+                        <p>The WTO provides a mechanism for resolving trade disputes between member countries.</p>
+                    </div>
+                </div>
+                
+                <p>The WTO is run by its member governments. All major decisions are made by the membership as a whole, either by ministers (who meet at least once every two years) or by their ambassadors or delegates (who meet regularly in Geneva).</p>
+            </div>
+        </section>
+        
+        <!-- Statistics Section -->
+        <section class="content-section">
+            <h2 class="section-title">WTO in Numbers</h2>
+            <div class="stats-container">
+                <div class="stat-item">
+                    <div class="stat-number">164</div>
+                    <div class="stat-label">Member Countries</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">98%</div>
+                    <div class="stat-label">Global Trade Coverage</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">1995</div>
+                    <div class="stat-label">Year Established</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">60+</div>
+                    <div class="stat-label">Trade Agreements</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">600+</div>
+                    <div class="stat-label">Disputes Handled</div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Functions Section -->
+        <section class="content-section" id="functions">
+            <h2 class="section-title">Key Functions of the WTO</h2>
+            <div class="section-content">
+                <p>The WTO performs several critical functions in the global trading system:</p>
+                
+                <div class="info-cards">
+                    <div class="info-card">
+                        <h3><i class="fas fa-file-contract"></i> Implementing Agreements</h3>
+                        <p>The WTO oversees the implementation, administration, and operation of the covered agreements, providing the common institutional framework for the conduct of trade relations among its members.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3><i class="fas fa-comments"></i> Negotiation Forum</h3>
+                        <p>It provides a forum for negotiations among its members concerning their multilateral trade relations in matters dealt with under the agreements.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3><i class="fas fa-tasks"></i> Dispute Settlement</h3>
+                        <p>The WTO administers the integrated dispute settlement system, which is a central element in providing security and predictability to the multilateral trading system.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3><i class="fas fa-chart-line"></i> Trade Policy Review</h3>
+                        <p>The WTO conducts regular reviews of individual members' trade policies and practices through the Trade Policy Review Mechanism (TPRM).</p>
+                    </div>
+                    <div class="info-card">
+                        <h3><i class="fas fa-hands-helping"></i> Technical Assistance</h3>
+                        <p>The WTO provides technical assistance and training for developing countries to help them build their trade capacity and participate more fully in the global trading system.</p>
+                    </div>
+                    <div class="info-card">
+                        <h3><i class="fas fa-eye"></i> Monitoring</h3>
+                        <p>The WTO monitors national trade policies and identifies trade issues that need attention, helping to ensure transparency and predictability in international trade.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- History Section -->
+        <section class="content-section" id="history">
+            <h2 class="section-title">History of the WTO</h2>
+            <div class="section-content">
+                <p>The WTO's creation in 1995 marked the biggest reform of international trade since the end of the Second World War. Its history can be traced through several key milestones:</p>
+                
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-year">1947</div>
+                            <p>The General Agreement on Tariffs and Trade (GATT) is signed by 23 countries as a provisional agreement to reduce trade barriers.</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-year">1948-1994</div>
+                            <p>GATT becomes the de facto global trade organization, overseeing eight rounds of multilateral trade negotiations that progressively reduced tariffs.</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-year">1986-1994</div>
+                            <p>The Uruguay Round of trade negotiations takes place, resulting in the most comprehensive set of trade agreements in history and the decision to create the WTO.</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-year">1995</div>
+                            <p>The World Trade Organization officially begins operations on January 1, replacing the GATT system with a more powerful and comprehensive institution.</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-year">2001</div>
+                            <p>The Doha Development Agenda is launched, focusing on addressing the needs of developing countries. China becomes a WTO member after 15 years of negotiations.</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-year">2013</div>
+                            <p>The Bali Package is agreed upon, the first major agreement under the WTO, focusing on trade facilitation, agriculture, and development issues.</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-year">2015</div>
+                            <p>The Nairobi Package is adopted, including decisions on agriculture, cotton, and issues related to least-developed countries.</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-year">2022</div>
+                            <p>WTO members reach historic agreements on fisheries subsidies and extend the moratorium on e-commerce tariffs at the 12th Ministerial Conference.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Principles Section -->
+        <section class="content-section" id="principles">
+            <h2 class="section-title">Fundamental Principles of the WTO</h2>
+            <div class="section-content">
+                <p>The WTO trading system is founded on several fundamental principles that form the basis of the multilateral trading system:</p>
+                
+                <div class="principles-list">
+                    <div class="principle">
+                        <h4>Most-Favored-Nation (MFN)</h4>
+                        <p>Under the WTO agreements, countries cannot normally discriminate between their trading partners. If a country improves the benefits it gives to one trading partner, it must give the same treatment to all other WTO members.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>National Treatment</h4>
+                        <p>Imported and locally-produced goods should be treated equally — at least after the foreign goods have entered the market. The same applies to foreign and domestic services, and to foreign and local trademarks, copyrights, and patents.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>Freer Trade</h4>
+                        <p>Lowering trade barriers is one of the most obvious means of encouraging trade. These barriers include customs duties (or tariffs) and measures such as import bans or quotas that restrict quantities selectively.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>Predictability and Transparency</h4>
+                        <p>With stability and predictability, investment is encouraged, jobs are created, and consumers can fully enjoy the benefits of competition — choice and lower prices.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>Promoting Fair Competition</h4>
+                        <p>The WTO is not a "free trade" institution as it allows tariffs and, in limited circumstances, other forms of protection. It is a system of rules dedicated to open, fair, and undistorted competition.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>Development and Economic Reform</h4>
+                        <p>The WTO agreements contain special provisions for developing countries, including longer periods to implement agreements and commitments, measures to increase trading opportunities, and support to build trade capacity.</p>
+                    </div>
+                </div>
+                
+                <p>These principles are the foundation of the multilateral trading system and are designed to ensure that trade flows as smoothly, predictably, and freely as possible.</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h3>World Trade Organization</h3>
+                    <p>The WTO is the only global international organization dealing with the rules of trade between nations. Its main function is to ensure that trade flows as smoothly, predictably and freely as possible.</p>
+                    <div class="social-icons">
+                        <a href="#"><i class="fab fa-twitter"></i></a>
+                        <a href="#"><i class="fab fa-linkedin-in"></i></a>
+                        <a href="#"><i class="fab fa-youtube"></i></a>
+                        <a href="#"><i class="fab fa-instagram"></i></a>
+                    </div>
+                </div>
+                
+                <div class="footer-section">
+                    <h3>Quick Links</h3>
+                    <ul class="footer-links">
+                        <li><a href="#home">Home</a></li>
+                        <li><a href="#about">About WTO</a></li>
+                        <li><a href="#functions">Functions</a></li>
+                        <li><a href="#history">History</a></li>
+                        <li><a href="#principles">Principles</a></li>
+                    </ul>
+                </div>
+                
+                <div class="footer-section">
+                    <h3>Contact Information</h3>
+                    <p><i class="fas fa-map-marker-alt"></i> Centre William Rappard, Rue de Lausanne 154, CH-1211 Geneva 21, Switzerland</p>
+                    <p><i class="fas fa-phone"></i> +41 (0)22 739 51 11</p>
+                    <p><i class="fas fa-envelope"></i> enquiries@wto.org</p>
+                    <p><i class="fas fa-globe"></i> www.wto.org</p>
+                </div>
+            </div>
+            
+            <div class="copyright">
+                <p>&copy; 2023 World Trade Organization Information Portal. This is an informational website and is not affiliated with the official WTO.</p>
+                <p>Data sources: WTO official publications and reports</p>
+            </div>
+        </div>
+    </footer>
+    
+    <!-- Back to Top Button -->
+    <a href="#" class="back-to-top" id="backToTop">
+        <i class="fas fa-arrow-up"></i>
+    </a>
+
+    <script>
+        // Smooth scrolling for navigation links
+        document.querySelectorAll('nav a').forEach(anchor => {
+            anchor.addEventListener('click', function(e) {
+                e.preventDefault();
+                
+                // Update active state
+                document.querySelectorAll('nav a').forEach(link => {
+                    link.classList.remove('active');
+                });
+                this.classList.add('active');
+                
+                // Scroll to target
+                const targetId = this.getAttribute('href');
+                if(targetId !== '#') {
+                    const targetSection = document.querySelector(targetId);
+                    if(targetSection) {
+                        window.scrollTo({
+                            top: targetSection.offsetTop - 80,
+                            behavior: 'smooth'
+                        });
+                    }
+                }
+            });
+        });
+        
+        // Back to top button functionality
+        const backToTopButton = document.getElementById('backToTop');
+        
+        window.addEventListener('scroll', function() {
+            if (window.pageYOffset > 300) {
+                backToTopButton.classList.add('visible');
+            } else {
+                backToTopButton.classList.remove('visible');
+            }
+        });
+        
+        backToTopButton.addEventListener('click', function(e) {
+            e.preventDefault();
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+            
+            // Update active nav
+            document.querySelectorAll('nav a').forEach(link => {
+                link.classList.remove('active');
+            });
+            document.querySelector('nav a[href="#home"]').classList.add('active');
+        });
+        
+        // Highlight current section while scrolling
+        window.addEventListener('scroll', function() {
+            const sections = document.querySelectorAll('.content-section');
+            const navLinks = document.querySelectorAll('nav a');
+            
+            let currentSection = '';
+            
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop - 100;
+                const sectionHeight = section.clientHeight;
+                if(pageYOffset >= sectionTop && pageYOffset < sectionTop + sectionHeight) {
+                    currentSection = '#' + section.getAttribute('id');
+                }
+            });
+            
+            // Update active nav link
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if(link.getAttribute('href') === currentSection) {
+                    link.classList.add('active');
+                }
+            });
+            
+            // If at top, highlight home
+            if(window.pageYOffset < 100) {
+                navLinks.forEach(link => link.classList.remove('active'));
+                document.querySelector('nav a[href="#home"]').classList.add('active');
+            }
+        });
+        
+        // Add animation to stats when they come into view
+        const observerOptions = {
+            threshold: 0.5
+        };
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const statNumbers = entry.target.querySelectorAll('.stat-number');
+                    statNumbers.forEach(stat => {
+                        // Simple animation for stats
+                        const originalNumber = stat.textContent;
+                        stat.textContent = '0';
+                        
+                        let counter = 0;
+                        const target = parseInt(originalNumber);
+                        const increment = target / 50;
+                        
+                        const updateCounter = () => {
+                            if (counter < target) {
+                                counter += increment;
+                                stat.textContent = Math.floor(counter);
+                                setTimeout(updateCounter, 30);
+                            } else {
+                                stat.textContent = originalNumber;
+                            }
+                        };
+                        
+                        updateCounter();
+                    });
+                    
+                    // Stop observing after animation
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+        
+        // Observe the stats section
+        const statsSection = document.querySelector('.stats-container');
+        if(statsSection) {
+            observer.observe(statsSection);
+        }
+    </script>
+</body>
+</html>

@@ -23,6 +23,7 @@ https://img.shields.io/badge/docker-ready-blue.svg
 * 不填写ARGO_DOMAIN和ARGO_AUTH两个变量即启用临时隧道，反之则使用固定隧道。
 * 哪吒v0/v1可选,当哪吒端口为{443,8443,2096,2087,2083,2053}其中之一时，自动开启tls。
 * 新增cf-vps监控，cf-vps监控项目地址https://github.com/kadidalax/cf-vps-monitor
+* node版本[GitHub仓库](https://github.com/mimaldq/nodejs-2go)
 
 ## 📋 环境变量
 

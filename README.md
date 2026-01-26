@@ -16,6 +16,38 @@ https://img.shields.io/badge/docker-ready-blue.svg
 · 📦 轻量容器 - 多架构Docker镜像支持
 · ⚡ 快速部署 - 一键部署到各种平台
 
+## 说明 （部署前请仔细阅读）
+
+* 本项目是针对node环境的paas平台和游戏玩具而生，采用Argo隧道部署节点，集成哪吒探针v0或v1可选。
+* node玩具平台只需上传index.js和package.json即可，paas平台需要docker部署的才上传Dockerfile。
+* 不填写ARGO_DOMAIN和ARGO_AUTH两个变量即启用临时隧道，反之则使用固定隧道。
+* 哪吒v0/v1可选,当哪吒端口为{443,8443,2096,2087,2083,2053}其中之一时，自动开启tls。
+* 新增cf-vps监控，cf-vps监控项目地址https://github.com/kadidalax/cf-vps-monitor
+
+## 📋 环境变量
+
+| 变量名 | 是否必须 | 默认值 | 说明 |
+|--------|----------|--------|------|
+| UPLOAD_URL | 否 | - | 订阅上传地址 |
+| PROJECT_URL | 否 | https://www.google.com | 项目分配的域名 |
+| AUTO_ACCESS | 否 | false | 是否开启自动访问保活 |
+| PORT | 否 | 3000 | HTTP服务监听端口 |
+| ARGO_PORT | 否 | 7860 | Argo隧道端口 |
+| UUID | 否 | e2cae6af-5cdd-fa48-4137-ad3e617fbab0 | 用户UUID |
+| NEZHA_SERVER | 否 | - | 哪吒面板域名 |
+| NEZHA_PORT | 否 | - | 哪吒端口 |
+| NEZHA_KEY | 否 | - | 哪吒密钥 |
+| ARGO_DOMAIN | 否 | - | Argo固定隧道域名 |
+| ARGO_AUTH | 否 | - | Argo固定隧道密钥 |
+| CFIP | 否 | www.visa.com.tw | 节点优选域名或IP |
+| CFPORT | 否 | 443 | 节点端口 |
+| NAME | 否 | Vls | 节点名称前缀 |
+| FILE_PATH | 否 | ./tmp | 运行目录 |
+| SUB_PATH | 否 | sub | 订阅路径 |
+| MONITOR_KEY | 否 | - | 监控脚本密钥 |
+| MONITOR_SERVER | 否 | - | 监控服务器标识 |
+| MONITOR_URL | 否 | - | 监控上报地址 |
+
 📦 快速开始
 
 Docker运行
@@ -58,28 +90,6 @@ services:
       - ./tmp:/app/tmp
 ```
 
-🔧 环境变量配置
-
-变量名 默认值 说明
-UPLOAD_URL 空 节点上传地址
-PROJECT_URL 空 项目URL
-AUTO_ACCESS false 自动保活
-FILE_PATH ./tmp 文件存储路径
-SUB_PATH sub 订阅路径
-SERVER_PORT / PORT 3000 HTTP服务端口
-UUID e2cae6af-... 用户UUID
-NEZHA_SERVER 空 哪吒监控服务器
-NEZHA_PORT 空 哪吒监控端口
-NEZHA_KEY 空 哪吒监控密钥
-ARGO_DOMAIN date.goyo123.ggff.net Cloudflare隧道域名
-ARGO_AUTH eyJhIjoi... Cloudflare隧道认证
-ARGO_PORT 7860 隧道端口
-CFIP cdns.doon.eu.org 优选IP/域名
-CFPORT 443 优选端口
-NAME 空 节点名称
-MONITOR_KEY 空 监控脚本密钥
-MONITOR_SERVER 空 监控服务器标识
-MONITOR_URL 空 监控上报地址
 
 📡 订阅访问
 
@@ -186,7 +196,7 @@ go-argo/
 · 感谢 Xray-core 项目
 · 感谢 Cloudflare 提供的隧道服务
 · 感谢 nezha 监控系统
-· 感谢原Node.js版本的所有贡献者
+· 感谢老王node-argo项目[GitHub仓库](https://github.com/eooce/nodejs-argo)
 
 📞 支持
 

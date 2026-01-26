@@ -1,3 +1,3 @@
-module proxy-server
+module go-app
 
 go 1.21

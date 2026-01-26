@@ -7,23 +7,20 @@ RUN apk add --no-cache git curl wget bash make gcc musl-dev ca-certificates
 # 设置工作目录
 WORKDIR /app
 
-# 复制go.mod和go.sum文件
+# 首先复制go.mod和go.sum文件
 COPY go.mod go.sum ./
 
 # 下载Go模块依赖
 RUN go mod download
 
-# 复制源代码
-COPY . .
+# 复制所有源代码文件
+COPY *.go ./
 
 # 构建Go应用
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o app main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o app
 
 # 创建必要的目录
 RUN mkdir -p /app/tmp && chmod -R 755 /app/tmp
-
-# 确保index.html存在（如果不存在则创建空文件）
-RUN if [ ! -f index.html ]; then echo "Creating empty index.html" && echo "Hello world!" > index.html; fi
 
 # 最终运行时镜像 - 使用更小的基础镜像
 FROM alpine:3.18

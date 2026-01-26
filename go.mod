@@ -1,1 +1,3 @@
-go mod init proxy-server
+module proxy-server
+
+go 1.21

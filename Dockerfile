@@ -51,9 +51,6 @@ RUN addgroup -g 1000 -S proxy && \
 # 复制可执行文件
 COPY --from=builder --chown=proxy:proxy /app/proxy-server /app/
 
-# 复制配置文件（如果有）
-COPY --chown=proxy:proxy index.html /app/
-
 # 创建必要的目录
 RUN mkdir -p /app/tmp && chown -R proxy:proxy /app/tmp
 

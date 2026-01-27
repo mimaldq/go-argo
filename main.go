@@ -50,7 +50,6 @@ var (
 	files          = make(map[string]string)
 	mu             sync.RWMutex
 	subscription   string
-	proxy          *httputil.ReverseProxy
 	monitorProcess *os.Process
 	proxyServer    *http.Server
 )
@@ -424,8 +423,11 @@ ingress:
 }
 
 func startProxyServer() {
-	// 创建反向代理处理器
-	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 创建HTTP服务器处理代理请求
+	mux := http.NewServeMux()
+	
+	// 处理所有请求
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		urlPath := r.URL.Path
 		
 		// 设置目标地址
@@ -455,7 +457,8 @@ func startProxyServer() {
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				log.Printf("代理错误: %v", err)
-				if !w.(interface{ Header() http.Header }).Header().Get("Content-Type") != "" {
+				// 修复第458行的错误：直接检查Content-Type是否为空
+				if w.Header().Get("Content-Type") == "" {
 					http.Error(w, "代理错误", http.StatusInternalServerError)
 				}
 			},
@@ -473,7 +476,7 @@ func startProxyServer() {
 	// 创建HTTP服务器
 	proxyServer = &http.Server{
 		Addr:    ":" + config.ArgoPort,
-		Handler: proxyHandler,
+		Handler: mux,
 	}
 	
 	log.Printf("代理服务器启动在端口: %s", config.ArgoPort)
@@ -489,42 +492,32 @@ func startHTTPServer() {
 	// 创建HTTP服务器
 	mux := http.NewServeMux()
 	
+	// 订阅路径处理
+	mux.HandleFunc("/"+config.SubPath, func(w http.ResponseWriter, r *http.Request) {
+		mu.RLock()
+		encoded := base64.StdEncoding.EncodeToString([]byte(subscription))
+		mu.RUnlock()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte(encoded))
+	})
+	
 	// 根路径处理
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		
-		// 订阅路径
-		if path == "/"+config.SubPath || path == "/"+config.SubPath+"/" {
-			mu.RLock()
-			encoded := base64.StdEncoding.EncodeToString([]byte(subscription))
-			mu.RUnlock()
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.Write([]byte(encoded))
-			return
+		// 检查index.html文件
+		indexPaths := []string{
+			"index.html",
+			"/app/index.html",
+			"./index.html",
 		}
 		
-		// 根路径
-		if path == "/" {
-			// 检查index.html文件
-			indexPaths := []string{
-				"index.html",
-				"/app/index.html",
-				"./index.html",
+		for _, indexPath := range indexPaths {
+			if _, err := os.Stat(indexPath); err == nil {
+				http.ServeFile(w, r, indexPath)
+				return
 			}
-			
-			for _, indexPath := range indexPaths {
-				if _, err := os.Stat(indexPath); err == nil {
-					http.ServeFile(w, r, indexPath)
-					return
-				}
-			}
-			
-			w.Write([]byte("Hello world!"))
-			return
 		}
 		
-		// 其他路径返回404
-		http.NotFound(w, r)
+		w.Write([]byte("Hello world!"))
 	})
 	
 	// 启动内部HTTP服务器

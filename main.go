@@ -70,6 +70,8 @@ var (
 	monitorMutex    sync.Mutex
 	xrayProxy       *httputil.ReverseProxy
 	httpProxy       *httputil.ReverseProxy
+	tunnelProcess   *exec.Cmd
+	tunnelMutex     sync.Mutex
 )
 
 // 初始化配置
@@ -85,8 +87,8 @@ func initConfig() {
 		NezhaServer:   getEnv("NEZHA_SERVER", ""),
 		NezhaPort:     getEnv("NEZHA_PORT", ""),
 		NezhaKey:      getEnv("NEZHA_KEY", ""),
-		ArgoDomain:    getEnv("ARGO_DOMAIN", "date.goyo123.ggff.net"),
-		ArgoAuth:      getEnv("ARGO_AUTH", "eyJhIjoiNWRmNTFlZjhhMTNiMWQ1ZDFhODhhZTAxNWFmYTU5OGIiLCJ0IjoiM2Q0M2I5ZTgtNDM0Zi00YjA2LTk5ZmEtMjc2ODc0MGI3ZTcyIiwicyI6Ill6SmhNemxoT1RFdFpUSTROeTAwTmpFeUxUazBOelV0WlRZNFptRTFabUV6WldKbCJ9"),
+		ArgoDomain:    getEnv("ARGO_DOMAIN", ""),
+		ArgoAuth:      getEnv("ARGO_AUTH", ""),
 		ArgoPort:      getEnv("ARGO_PORT", "7860"),
 		CFIP:          getEnv("CFIP", "cdns.doon.eu.org"),
 		CFPort:        getEnv("CFPORT", "443"),
@@ -670,32 +672,84 @@ uuid: %s
 			// 隧道配置文件
 			if _, err := os.Stat(tunnelYamlPath); os.IsNotExist(err) {
 				log.Println("等待隧道配置文件生成...")
-				time.Sleep(1 * time.Second)
+				time.Sleep(2 * time.Second)
 			}
 			args = []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
 				"--protocol", "http2", "--config", tunnelYamlPath, "run"}
 		} else {
-			// 临时隧道
+			// 临时隧道 - 使用debug级别日志以便查看更多信息
 			args = []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
-				"--protocol", "http2", "--logfile", bootLogPath, "--loglevel", "info",
+				"--protocol", "http2", "--logfile", bootLogPath, "--loglevel", "debug",
 				"--url", fmt.Sprintf("http://localhost:%s", config.ArgoPort)}
 		}
 		
+		tunnelMutex.Lock()
 		cmd := exec.Command(botPath, args...)
+		tunnelProcess = cmd
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
 			log.Printf("运行cloudflared失败: %v", err)
 		} else {
 			log.Printf("%s 运行中", botName)
-			go cmd.Wait()
+			go func() {
+				err := cmd.Wait()
+				log.Printf("隧道进程退出: %v", err)
+				// 如果隧道进程退出，尝试重新启动
+				time.Sleep(10 * time.Second)
+				restartTunnel()
+			}()
 		}
+		tunnelMutex.Unlock()
 		
-		log.Println("等待隧道启动...")
-		time.Sleep(5 * time.Second)
+		// 增加初始等待时间，让隧道有时间启动
+		log.Println("等待隧道启动和上线（这可能需要15-30秒）...")
+		time.Sleep(15 * time.Second)
 	}
 	
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 	return nil
+}
+
+// 重启隧道
+func restartTunnel() {
+	tunnelMutex.Lock()
+	defer tunnelMutex.Unlock()
+	
+	log.Println("正在重新启动隧道...")
+	
+	// 杀死现有进程
+	killBotProcess()
+	time.Sleep(3 * time.Second)
+	
+	// 重新启动
+	if config.ArgoAuth != "" && len(config.ArgoAuth) >= 120 && len(config.ArgoAuth) <= 250 &&
+	   strings.Contains(config.ArgoAuth, "=") {
+		args := []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
+			"--protocol", "http2", "run", "--token", config.ArgoAuth}
+		cmd := exec.Command(botPath, args...)
+		tunnelProcess = cmd
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			log.Printf("重新启动隧道失败: %v", err)
+		} else {
+			log.Println("隧道已重新启动")
+			go cmd.Wait()
+		}
+	} else {
+		// 临时隧道
+		args := []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
+			"--protocol", "http2", "--logfile", bootLogPath, "--loglevel", "debug",
+			"--url", fmt.Sprintf("http://localhost:%s", config.ArgoPort)}
+		cmd := exec.Command(botPath, args...)
+		tunnelProcess = cmd
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			log.Printf("重新启动隧道失败: %v", err)
+		} else {
+			log.Println("隧道已重新启动")
+			go cmd.Wait()
+		}
+	}
 }
 
 // 处理固定隧道
@@ -825,14 +879,14 @@ func startMonitorScript() {
 		return
 	}
 	
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 	
 	if downloaded := downloadMonitorScript(); downloaded {
 		runMonitorScript()
 	}
 }
 
-// 提取临时隧道域名
+// 提取临时隧道域名 - 增加重试机制
 func extractDomains() error {
 	var argoDomain string
 	
@@ -842,71 +896,124 @@ func extractDomains() error {
 		return generateLinks(argoDomain)
 	}
 	
-	data, err := os.ReadFile(bootLogPath)
-	if err != nil {
-		return err
-	}
-	
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "trycloudflare.com") {
-			start := strings.Index(line, "https://")
-			if start == -1 {
-				start = strings.Index(line, "http://")
-			}
-			if start != -1 {
-				line = line[start:]
-				end := strings.Index(line, " ")
-				if end == -1 {
-					end = len(line)
+	// 尝试读取日志文件，最多重试10次
+	maxRetries := 10
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("尝试读取隧道日志 (第 %d/%d 次)...", attempt, maxRetries)
+		
+		data, err := os.ReadFile(bootLogPath)
+		if err != nil {
+			log.Printf("读取日志文件失败: %v", err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+		
+		lines := strings.Split(string(data), "\n")
+		foundDomain := false
+		for _, line := range lines {
+			if strings.Contains(line, "trycloudflare.com") {
+				// 查找域名
+				start := strings.Index(line, "https://")
+				if start == -1 {
+					start = strings.Index(line, "http://")
 				}
-				domain := line[:end]
-				if strings.Contains(domain, "trycloudflare.com") {
-					argoDomain = strings.TrimPrefix(domain, "https://")
-					argoDomain = strings.TrimPrefix(argoDomain, "http://")
-					argoDomain = strings.TrimSuffix(argoDomain, "/")
-					log.Printf("找到临时域名: %s", argoDomain)
-					return generateLinks(argoDomain)
+				if start != -1 {
+					line = line[start:]
+					end := strings.Index(line, " ")
+					if end == -1 {
+						end = len(line)
+					}
+					domain := line[:end]
+					if strings.Contains(domain, "trycloudflare.com") {
+						argoDomain = strings.TrimPrefix(domain, "https://")
+						argoDomain = strings.TrimPrefix(argoDomain, "http://")
+						argoDomain = strings.TrimSuffix(argoDomain, "/")
+						log.Printf("成功找到临时域名: %s", argoDomain)
+						foundDomain = true
+						break
+					}
 				}
 			}
+			// 检查隧道状态
+			if strings.Contains(line, "INF Registered tunnel connection") {
+				log.Printf("隧道连接已注册")
+			}
+			if strings.Contains(line, "INF Connection") {
+				log.Printf("隧道连接信息: %s", line)
+			}
+		}
+		
+		if foundDomain {
+			return generateLinks(argoDomain)
+		}
+		
+		if attempt < maxRetries {
+			waitTime := time.Duration(attempt) * 2 * time.Second
+			log.Printf("未找到域名，等待 %v 后重试...", waitTime)
+			time.Sleep(waitTime)
 		}
 	}
 	
-	log.Println("未找到域名，重新运行bot以获取Argo域名")
+	log.Println("经过多次尝试仍未找到域名，将稍后重试...")
+	// 不立即重启，等待健康检查处理
+	return fmt.Errorf("未能提取到隧道域名")
+}
+
+// 重新启动隧道并尝试提取域名
+func restartTunnelAndExtract() error {
+	log.Println("重新启动隧道以获取域名...")
+	
+	// 停止现有的cloudflared进程
+	killBotProcess()
+	time.Sleep(5 * time.Second)
+	
+	// 删除旧的日志文件
 	os.Remove(bootLogPath)
 	
-	killBotProcess()
-	time.Sleep(3 * time.Second)
-	
+	// 重新启动cloudflared（临时隧道）
 	args := []string{"tunnel", "--edge-ip-version", "auto", "--no-autoupdate",
-		"--protocol", "http2", "--logfile", bootLogPath, "--loglevel", "info",
+		"--protocol", "http2", "--logfile", bootLogPath, "--loglevel", "debug",
 		"--url", fmt.Sprintf("http://localhost:%s", config.ArgoPort)}
 	
 	cmd := exec.Command(botPath, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
+		log.Printf("重新启动隧道失败: %v", err)
 		return err
 	}
+	tunnelProcess = cmd
 	go cmd.Wait()
 	
-	log.Printf("%s 重新运行中", botName)
-	time.Sleep(3 * time.Second)
+	log.Printf("%s 已重新启动，等待隧道上线...", botName)
 	
+	// 等待更长时间让隧道上线
+	time.Sleep(20 * time.Second)
+	
+	// 再次尝试提取域名
 	return extractDomains()
 }
 
 // 杀死bot进程
 func killBotProcess() {
+	if tunnelProcess != nil && tunnelProcess.Process != nil {
+		tunnelProcess.Process.Kill()
+	}
+	
 	if runtime.GOOS == "windows" {
-		exec.Command("taskkill", "/f", "/im", botName+".exe").Run()
+		exec.Command("taskkill", "/f", "/im", botName).Run()
+		exec.Command("taskkill", "/f", "/im", "cloudflared").Run()
 	} else {
 		exec.Command("pkill", "-f", botName).Run()
+		exec.Command("pkill", "-f", "cloudflared").Run()
+		exec.Command("killall", botName).Run()
+		exec.Command("killall", "cloudflared").Run()
 	}
+	time.Sleep(2 * time.Second)
 }
 
 // 获取ISP信息
 func getMetaInfo() string {
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second}
 	
 	resp, err := client.Get("https://ipapi.co/json/")
 	if err == nil {
@@ -980,6 +1087,7 @@ trojan://%s@%s:%s?security=tls&sni=%s&fp=firefox&type=ws&host=%s&path=%s#%s
 		vmessBase64, config.UUID, config.CFIP, config.CFPort, argoDomain, argoDomain, encodedPath, nodeName)
 	
 	encoded := base64.StdEncoding.EncodeToString([]byte(subTxt))
+	log.Println("生成的订阅内容 (base64):")
 	log.Println(encoded)
 	
 	if err := os.WriteFile(subPath, []byte(encoded), 0644); err != nil {
@@ -1090,6 +1198,61 @@ func addVisitTask() {
 	log.Println("自动访问任务添加成功")
 }
 
+// 隧道健康检查
+func tunnelHealthCheck() {
+	// 等待3分钟后开始定期检查隧道状态
+	time.Sleep(3 * time.Minute)
+	
+	for {
+		// 每5分钟检查一次
+		time.Sleep(5 * time.Minute)
+		
+		log.Println("执行隧道健康检查...")
+		
+		// 检查隧道日志文件是否存在
+		if _, err := os.Stat(bootLogPath); os.IsNotExist(err) {
+			log.Println("隧道日志文件不存在，隧道可能已断开，尝试重新启动...")
+			restartTunnel()
+			continue
+		}
+		
+		// 检查日志文件中是否有错误信息
+		data, err := os.ReadFile(bootLogPath)
+		if err == nil {
+			content := string(data)
+			
+			// 检查是否包含域名
+			if strings.Contains(content, "trycloudflare.com") {
+				log.Println("隧道正常运行，已检测到域名")
+			} else if strings.Contains(content, "ERR") && 
+			   (strings.Contains(content, "connection failed") || 
+			    strings.Contains(content, "disconnected") ||
+				strings.Contains(content, "failed to connect")) {
+				log.Println("检测到隧道连接错误，尝试重新连接...")
+				restartTunnel()
+			} else {
+				// 检查隧道是否活跃
+				lines := strings.Split(content, "\n")
+				recentLogs := lines[len(lines)-10:] // 查看最近10行日志
+				hasRecentActivity := false
+				for _, line := range recentLogs {
+					if strings.Contains(line, "INF") && 
+					   (strings.Contains(line, "request") || 
+					    strings.Contains(line, "connection")) {
+						hasRecentActivity = true
+						break
+					}
+				}
+				
+				if !hasRecentActivity {
+					log.Println("隧道长时间无活动，尝试重新启动...")
+					restartTunnel()
+				}
+			}
+		}
+	}
+}
+
 // 主运行逻辑
 func startServer() {
 	log.Println("开始服务器初始化...")
@@ -1109,15 +1272,21 @@ func startServer() {
 		return
 	}
 	
-	log.Println("等待隧道启动...")
-	time.Sleep(5 * time.Second)
+	// 等待更长的时间让隧道完全上线
+	log.Println("等待隧道完全上线（可能需要1-2分钟）...")
+	time.Sleep(30 * time.Second)
 	
+	// 提取域名（内部已有重试机制）
 	if err := extractDomains(); err != nil {
 		log.Printf("提取域名失败: %v", err)
+		// 即使失败也继续运行，健康检查会稍后处理
+		log.Println("域名提取失败，程序将继续运行，健康检查会稍后重试")
 	}
 	
 	addVisitTask()
 	log.Println("服务器初始化完成")
+	log.Println("注意：临时隧道可能需要几分钟才能完全上线")
+	log.Println("请耐心等待，健康检查会自动维护隧道连接")
 }
 
 func main() {
@@ -1162,23 +1331,35 @@ func main() {
 		}
 	}()
 	
+	// 启动主流程
 	go startServer()
 	
+	// 启动监控脚本
 	go startMonitorScript()
 	
+	// 启动隧道健康检查
+	go tunnelHealthCheck()
+	
+	// 清理文件
 	cleanFiles()
 	
+	// 等待终止信号
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	
 	<-sigChan
 	log.Println("收到关闭信号，正在清理...")
 	
+	// 停止监控脚本
 	if monitorProcess != nil {
 		log.Println("停止监控脚本...")
 		monitorProcess.Process.Kill()
 	}
 	
+	// 停止隧道进程
+	killBotProcess()
+	
+	// 优雅关闭服务器
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	

@@ -111,12 +111,12 @@ func initConfig() {
 		SubPath:       getEnv("SUB_PATH", "sub"),
 		Port:          getEnv("SERVER_PORT", getEnv("PORT", "3000")),
 		ArgoPort:      getEnv("ARGO_PORT", "7860"),
-		UUID:          getEnv("UUID", ""),
+		UUID:          getEnv("UUID", "e2cae6af-5cdd-fa48-4137-ad3e617fbab0"),
 		NezhaServer:   getEnv("NEZHA_SERVER", ""),
 		NezhaPort:     getEnv("NEZHA_PORT", ""),
 		NezhaKey:      getEnv("NEZHA_KEY", ""),
 		ArgoDomain:    getEnv("ARGO_DOMAIN", "date.goyo123.ggff.net"),
-		ArgoAuth:      getEnv("ARGO_AUTH", ""),
+		ArgoAuth:      getEnv("ARGO_AUTH", "eyJhIjoiNWRmNTFlZjhhMTNiMWQ1ZDFhODhhZTAxNWFmYTU5OGIiLCJ0IjoiM2Q0M2I5ZTgtNDM0Zi00YjA2LTk5ZmEtMjc2ODc0MGI3ZTcyIiwicyI6Ill6SmhNemxoT1RFdFpUSTROeTAwTmpFeUxUazBOelV0WlRZNFptRTFabUV6WldKbCJ9"),
 		CFIP:          getEnv("CFIP", "cdns.doon.eu.org"),
 		CFPort:        getEnv("CFPORT", "443"),
 		Name:          getEnv("NAME", ""),
@@ -134,9 +134,6 @@ func initConfig() {
 func tunePerformance() {
 	// 设置GOMAXPROCS为CPU核心数
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	
-	// 调整Go的垃圾回收策略（可选）
-	// GOGC环境变量可以控制GC频率，默认100
 	
 	log.Printf("性能调优: GOMAXPROCS=%d, CPU核心数=%d", runtime.GOMAXPROCS(0), runtime.NumCPU())
 }
@@ -605,10 +602,9 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 		r.RemoteAddr, atomic.LoadInt64(&bytesForwarded))
 }
 
-// 普通HTTP代理处理
+// 普通HTTP代理处理 - 修复了targetURL未使用的错误
 func handleHTTPProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
-	targetURL := fmt.Sprintf("http://%s:%s", targetHost, targetPort)
-	
+	// 直接使用targetHost和targetPort，不需要创建未使用的targetURL变量
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = "http"
@@ -629,15 +625,21 @@ func handleHTTPProxy(w http.ResponseWriter, r *http.Request, targetHost, targetP
 	proxy.ServeHTTP(w, r)
 }
 
-// 处理统计信息请求
+// 处理统计信息请求 - 修复了runtime.NumGC未定义的错误
 func handleStats(w http.ResponseWriter, r *http.Request) {
+	// 使用runtime.ReadMemStats获取内存统计信息
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	
 	stats := map[string]interface{}{
 		"ws_connections": atomic.LoadInt64(&wsConnections),
 		"total_bytes":    atomic.LoadInt64(&totalBytes),
 		"goroutines":     runtime.NumGoroutine(),
 		"memory": map[string]interface{}{
-			"alloc":       formatBytes(getMemoryUsage()),
-			"num_gc":      runtime.NumGC(),
+			"alloc":       formatBytes(int64(memStats.Alloc)),
+			"total_alloc": formatBytes(int64(memStats.TotalAlloc)),
+			"sys":         formatBytes(int64(memStats.Sys)),
+			"num_gc":      memStats.NumGC, // 使用memStats.NumGC而不是runtime.NumGC
 		},
 	}
 	
@@ -656,12 +658,6 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-func getMemoryUsage() int64 {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return int64(m.Alloc)
 }
 
 func startHTTPServer() {

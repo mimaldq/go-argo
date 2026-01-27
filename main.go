@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -52,11 +54,18 @@ var (
 	subscription   string
 	monitorProcess *os.Process
 	proxyServer    *http.Server
+	
+	// 统计信息
+	wsConnections int64
+	totalBytes    int64
 )
 
 func main() {
 	// 初始化配置
 	initConfig()
+
+	// 性能调优
+	tunePerformance()
 
 	// 创建目录
 	if err := os.MkdirAll(config.FilePath, 0755); err != nil {
@@ -102,11 +111,11 @@ func initConfig() {
 		SubPath:       getEnv("SUB_PATH", "sub"),
 		Port:          getEnv("SERVER_PORT", getEnv("PORT", "3000")),
 		ArgoPort:      getEnv("ARGO_PORT", "7860"),
-		UUID:          getEnv("UUID", "e2cae6af-5cdd-fa48-4137-ad3e617fbab0"),
+		UUID:          getEnv("UUID", ""),
 		NezhaServer:   getEnv("NEZHA_SERVER", ""),
 		NezhaPort:     getEnv("NEZHA_PORT", ""),
 		NezhaKey:      getEnv("NEZHA_KEY", ""),
-		ArgoDomain:    getEnv("ARGO_DOMAIN", ""),
+		ArgoDomain:    getEnv("ARGO_DOMAIN", "date.goyo123.ggff.net"),
 		ArgoAuth:      getEnv("ARGO_AUTH", ""),
 		CFIP:          getEnv("CFIP", "cdns.doon.eu.org"),
 		CFPort:        getEnv("CFPORT", "443"),
@@ -120,6 +129,16 @@ func initConfig() {
 	log.Printf("UUID: %s", config.UUID)
 	log.Printf("Argo端口: %s", config.ArgoPort)
 	log.Printf("HTTP端口: %s", config.Port)
+}
+
+func tunePerformance() {
+	// 设置GOMAXPROCS为CPU核心数
+	runtime.GOMAXPROCS(runtime.NumCPU())
+	
+	// 调整Go的垃圾回收策略（可选）
+	// GOGC环境变量可以控制GC频率，默认100
+	
+	log.Printf("性能调优: GOMAXPROCS=%d, CPU核心数=%d", runtime.GOMAXPROCS(0), runtime.NumCPU())
 }
 
 func getEnv(key, defaultValue string) string {
@@ -422,70 +441,227 @@ ingress:
 	}
 }
 
+// 启动代理服务器
 func startProxyServer() {
-	// 创建HTTP服务器处理代理请求
+	// 创建HTTP服务器
 	mux := http.NewServeMux()
 	
-	// 处理所有请求
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		urlPath := r.URL.Path
-		
-		// 设置目标地址
-		var target string
-		if strings.HasPrefix(urlPath, "/vless-argo") || 
-			strings.HasPrefix(urlPath, "/vmess-argo") || 
-			strings.HasPrefix(urlPath, "/trojan-argo") ||
-			urlPath == "/vless" || 
-			urlPath == "/vmess" || 
-			urlPath == "/trojan" {
-			// 转发到Xray端口（3001）
-			target = "http://localhost:3001"
-		} else {
-			// 转发到HTTP服务器端口
-			target = "http://localhost:" + config.Port
-		}
-		
-		// 创建反向代理
-		proxy := &httputil.ReverseProxy{
-			Director: func(req *http.Request) {
-				req.URL.Scheme = "http"
-				req.URL.Host = strings.TrimPrefix(target, "http://")
-				req.Host = req.URL.Host
-				if _, ok := req.Header["User-Agent"]; !ok {
-					req.Header.Set("User-Agent", "")
-				}
-			},
-			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-				log.Printf("代理错误: %v", err)
-				// 修复第458行的错误：直接检查Content-Type是否为空
-				if w.Header().Get("Content-Type") == "" {
-					http.Error(w, "代理错误", http.StatusInternalServerError)
-				}
-			},
-		}
-		
-		// 处理WebSocket升级
-		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
-			proxy.ServeHTTP(w, r)
-			return
-		}
-		
-		proxy.ServeHTTP(w, r)
-	})
+	// 添加监控端点
+	mux.HandleFunc("/stats", handleStats)
 	
-	// 创建HTTP服务器
+	// 处理所有请求
+	mux.HandleFunc("/", handleProxyRequest)
+	
 	proxyServer = &http.Server{
 		Addr:    ":" + config.ArgoPort,
 		Handler: mux,
 	}
 	
-	log.Printf("代理服务器启动在端口: %s", config.ArgoPort)
+	log.Printf("TCP级WebSocket代理服务器启动在端口: %s", config.ArgoPort)
 	log.Printf("HTTP流量 -> localhost:%s", config.Port)
 	log.Printf("Xray流量 -> localhost:3001")
 	
 	if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("代理服务器启动失败: %v", err)
 	}
+}
+
+// 处理代理请求
+func handleProxyRequest(w http.ResponseWriter, r *http.Request) {
+	urlPath := r.URL.Path
+	
+	// 判断是否是WebSocket升级请求
+	isWebSocket := strings.ToLower(r.Header.Get("Upgrade")) == "websocket"
+	
+	// 确定目标地址
+	var targetHost, targetPort string
+	targetHost = "localhost"
+	
+	if strings.HasPrefix(urlPath, "/vless-argo") || 
+		strings.HasPrefix(urlPath, "/vmess-argo") || 
+		strings.HasPrefix(urlPath, "/trojan-argo") ||
+		urlPath == "/vless" || 
+		urlPath == "/vmess" || 
+		urlPath == "/trojan" {
+		targetPort = "3001" // Xray端口
+	} else {
+		targetPort = config.Port // HTTP服务器端口
+	}
+	
+	// WebSocket请求使用TCP级代理
+	if isWebSocket {
+		handleWebSocketProxy(w, r, targetHost, targetPort)
+		return
+	}
+	
+	// 普通HTTP请求使用标准反向代理
+	handleHTTPProxy(w, r, targetHost, targetPort)
+}
+
+// TCP级WebSocket代理实现
+func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
+	log.Printf("WebSocket代理请求: %s %s -> %s:%s", 
+		r.Method, r.URL.Path, targetHost, targetPort)
+	
+	// 验证WebSocket升级请求
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	if strings.ToLower(r.Header.Get("Upgrade")) != "websocket" ||
+		strings.ToLower(r.Header.Get("Connection")) != "upgrade" {
+		http.Error(w, "Not a WebSocket upgrade request", http.StatusBadRequest)
+		return
+	}
+	
+	// 连接后端服务
+	backendAddr := net.JoinHostPort(targetHost, targetPort)
+	backendConn, err := net.Dial("tcp", backendAddr)
+	if err != nil {
+		log.Printf("连接后端失败 %s: %v", backendAddr, err)
+		http.Error(w, "无法连接后端服务", http.StatusBadGateway)
+		return
+	}
+	defer backendConn.Close()
+	
+	// 设置连接超时
+	backendConn.SetDeadline(time.Now().Add(30 * time.Second))
+	
+	// 劫持客户端连接
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "不支持连接劫持", http.StatusInternalServerError)
+		return
+	}
+	
+	clientConn, clientBuf, err := hijacker.Hijack()
+	if err != nil {
+		log.Printf("劫持连接失败: %v", err)
+		http.Error(w, "连接劫持失败", http.StatusInternalServerError)
+		return
+	}
+	defer clientConn.Close()
+	
+	// 如果有缓冲数据，先发送到后端
+	if clientBuf != nil && clientBuf.Reader.Buffered() > 0 {
+		buffered, _ := io.ReadAll(clientBuf.Reader)
+		if _, err := backendConn.Write(buffered); err != nil {
+			log.Printf("发送缓冲数据失败: %v", err)
+			return
+		}
+	}
+	
+	// 转发原始HTTP请求到后端
+	if err := r.Write(backendConn); err != nil {
+		log.Printf("转发请求失败: %v", err)
+		return
+	}
+	
+	// 更新统计信息
+	atomic.AddInt64(&wsConnections, 1)
+	defer atomic.AddInt64(&wsConnections, -1)
+	
+	log.Printf("WebSocket隧道建立: %s -> %s:%s", 
+		r.RemoteAddr, targetHost, targetPort)
+	
+	// 设置双向转发的超时
+	clientConn.SetDeadline(time.Time{}) // 不超时
+	backendConn.SetDeadline(time.Time{})
+	
+	// 错误通道
+	errCh := make(chan error, 2)
+	
+	// 启动双向数据转发
+	var bytesForwarded int64
+	
+	// 客户端 -> 后端
+	go func() {
+		n, err := io.Copy(backendConn, clientConn)
+		atomic.AddInt64(&bytesForwarded, n)
+		atomic.AddInt64(&totalBytes, n)
+		errCh <- err
+	}()
+	
+	// 后端 -> 客户端
+	go func() {
+		n, err := io.Copy(clientConn, backendConn)
+		atomic.AddInt64(&bytesForwarded, n)
+		atomic.AddInt64(&totalBytes, n)
+		errCh <- err
+	}()
+	
+	// 等待任意一端出错或完成
+	select {
+	case err := <-errCh:
+		if err != nil && err != io.EOF {
+			log.Printf("WebSocket转发错误: %v", err)
+		}
+	case <-time.After(24 * time.Hour):
+		// 长时间运行，正常情况
+	}
+	
+	log.Printf("WebSocket连接关闭: %s (转发: %d bytes)", 
+		r.RemoteAddr, atomic.LoadInt64(&bytesForwarded))
+}
+
+// 普通HTTP代理处理
+func handleHTTPProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
+	targetURL := fmt.Sprintf("http://%s:%s", targetHost, targetPort)
+	
+	proxy := &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = "http"
+			req.URL.Host = fmt.Sprintf("%s:%s", targetHost, targetPort)
+			req.Host = req.URL.Host
+			
+			// 保留原始请求头
+			if _, ok := req.Header["User-Agent"]; !ok {
+				req.Header.Set("User-Agent", "Argo-Tunnel-Proxy/1.0")
+			}
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("HTTP代理错误: %v", err)
+			http.Error(w, "代理错误", http.StatusInternalServerError)
+		},
+	}
+	
+	proxy.ServeHTTP(w, r)
+}
+
+// 处理统计信息请求
+func handleStats(w http.ResponseWriter, r *http.Request) {
+	stats := map[string]interface{}{
+		"ws_connections": atomic.LoadInt64(&wsConnections),
+		"total_bytes":    atomic.LoadInt64(&totalBytes),
+		"goroutines":     runtime.NumGoroutine(),
+		"memory": map[string]interface{}{
+			"alloc":       formatBytes(getMemoryUsage()),
+			"num_gc":      runtime.NumGC(),
+		},
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func getMemoryUsage() int64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return int64(m.Alloc)
 }
 
 func startHTTPServer() {

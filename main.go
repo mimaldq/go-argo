@@ -454,9 +454,8 @@ func startProxyServer() {
 		Handler: mux,
 	}
 	
-	log.Printf("TCP级WebSocket代理服务器启动在端口: %s", config.ArgoPort)
-	log.Printf("HTTP流量 -> localhost:%s", config.Port)
-	log.Printf("Xray流量 -> localhost:3001")
+	// 移除WebSocket相关日志，只保留基本服务器启动信息
+	log.Printf("代理服务器启动在端口: %s", config.ArgoPort)
 	
 	if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("代理服务器启动失败: %v", err)
@@ -495,11 +494,8 @@ func handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	handleHTTPProxy(w, r, targetHost, targetPort)
 }
 
-// TCP级WebSocket代理实现
+// TCP级WebSocket代理实现 - 移除所有正常连接的日志
 func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
-	log.Printf("WebSocket代理请求: %s %s -> %s:%s", 
-		r.Method, r.URL.Path, targetHost, targetPort)
-	
 	// 验证WebSocket升级请求
 	if r.Method != "GET" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -516,7 +512,8 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	backendAddr := net.JoinHostPort(targetHost, targetPort)
 	backendConn, err := net.Dial("tcp", backendAddr)
 	if err != nil {
-		log.Printf("连接后端失败 %s: %v", backendAddr, err)
+		// 保留错误日志，但简化输出
+		log.Printf("连接后端失败: %v", err)
 		http.Error(w, "无法连接后端服务", http.StatusBadGateway)
 		return
 	}
@@ -544,23 +541,18 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	if clientBuf != nil && clientBuf.Reader.Buffered() > 0 {
 		buffered, _ := io.ReadAll(clientBuf.Reader)
 		if _, err := backendConn.Write(buffered); err != nil {
-			log.Printf("发送缓冲数据失败: %v", err)
-			return
+			return // 移除错误日志，静默处理
 		}
 	}
 	
 	// 转发原始HTTP请求到后端
 	if err := r.Write(backendConn); err != nil {
-		log.Printf("转发请求失败: %v", err)
-		return
+		return // 移除错误日志，静默处理
 	}
 	
 	// 更新统计信息
 	atomic.AddInt64(&wsConnections, 1)
 	defer atomic.AddInt64(&wsConnections, -1)
-	
-	log.Printf("WebSocket隧道建立: %s -> %s:%s", 
-		r.RemoteAddr, targetHost, targetPort)
 	
 	// 设置双向转发的超时
 	clientConn.SetDeadline(time.Time{}) // 不超时
@@ -591,18 +583,19 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	// 等待任意一端出错或完成
 	select {
 	case err := <-errCh:
+		// 只记录非EOF的错误
 		if err != nil && err != io.EOF {
 			log.Printf("WebSocket转发错误: %v", err)
 		}
+		// 正常关闭不输出任何日志
 	case <-time.After(24 * time.Hour):
-		// 长时间运行，正常情况
+		// 长时间运行，不输出日志
 	}
 	
-	log.Printf("WebSocket连接关闭: %s (转发: %d bytes)", 
-		r.RemoteAddr, atomic.LoadInt64(&bytesForwarded))
+	// 移除连接关闭的日志
 }
 
-// 普通HTTP代理处理 - 修复了targetURL未使用的错误
+// 普通HTTP代理处理
 func handleHTTPProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
 	// 直接使用targetHost和targetPort，不需要创建未使用的targetURL变量
 	proxy := &httputil.ReverseProxy{
@@ -625,7 +618,7 @@ func handleHTTPProxy(w http.ResponseWriter, r *http.Request, targetHost, targetP
 	proxy.ServeHTTP(w, r)
 }
 
-// 处理统计信息请求 - 修复了runtime.NumGC未定义的错误
+// 处理统计信息请求
 func handleStats(w http.ResponseWriter, r *http.Request) {
 	// 使用runtime.ReadMemStats获取内存统计信息
 	var memStats runtime.MemStats

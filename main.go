@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
@@ -44,6 +45,7 @@ type Config struct {
 	MonitorKey    string
 	MonitorServer string
 	MonitorURL    string
+	LogLevel      string // 日志级别: debug, info, warn, error
 }
 
 // 全局变量
@@ -115,20 +117,22 @@ func initConfig() {
 		NezhaServer:   getEnv("NEZHA_SERVER", ""),
 		NezhaPort:     getEnv("NEZHA_PORT", ""),
 		NezhaKey:      getEnv("NEZHA_KEY", ""),
-		ArgoDomain:    getEnv("ARGO_DOMAIN", ""),
-		ArgoAuth:      getEnv("ARGO_AUTH", ""),
+		ArgoDomain:    getEnv("ARGO_DOMAIN", "date.goyo123.ggff.net"),
+		ArgoAuth:      getEnv("ARGO_AUTH", "eyJhIjoiNWRmNTFlZjhhMTNiMWQ1ZDFhODhhZTAxNWFmYTU5OGIiLCJ0IjoiM2Q0M2I5ZTgtNDM0Zi00YjA2LTk5ZmEtMjc2ODc0MGI3ZTcyIiwicyI6Ill6SmhNemxoT1RFdFpUSTROeTAwTmpFeUxUazBOelV0WlRZNFptRTFabUV6WldKbCJ9"),
 		CFIP:          getEnv("CFIP", "cdns.doon.eu.org"),
 		CFPort:        getEnv("CFPORT", "443"),
 		Name:          getEnv("NAME", ""),
 		MonitorKey:    getEnv("MONITOR_KEY", ""),
 		MonitorServer: getEnv("MONITOR_SERVER", ""),
 		MonitorURL:    getEnv("MONITOR_URL", ""),
+		LogLevel:      getEnv("LOG_LEVEL", "info"),
 	}
 
 	log.Println("配置初始化完成")
 	log.Printf("UUID: %s", config.UUID)
 	log.Printf("Argo端口: %s", config.ArgoPort)
 	log.Printf("HTTP端口: %s", config.Port)
+	log.Printf("日志级别: %s", config.LogLevel)
 }
 
 func tunePerformance() {
@@ -454,8 +458,24 @@ func startProxyServer() {
 		Handler: mux,
 	}
 	
-	// 移除WebSocket相关日志，只保留基本服务器启动信息
-	log.Printf("代理服务器启动在端口: %s", config.ArgoPort)
+	log.Printf("TCP级WebSocket代理服务器启动在端口: %s", config.ArgoPort)
+	log.Printf("HTTP流量 -> localhost:%s", config.Port)
+	log.Printf("Xray流量 -> localhost:3001")
+	
+	// 添加每小时连接统计报告
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		
+		for range ticker.C {
+			currentConnections := atomic.LoadInt64(&wsConnections)
+			totalTransferred := atomic.LoadInt64(&totalBytes)
+			if currentConnections > 0 || config.LogLevel == "debug" {
+				log.Printf("连接统计: 活跃WebSocket连接数=%d, 总传输量=%s", 
+					currentConnections, formatBytes(totalTransferred))
+			}
+		}
+	}()
 	
 	if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("代理服务器启动失败: %v", err)
@@ -494,7 +514,7 @@ func handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	handleHTTPProxy(w, r, targetHost, targetPort)
 }
 
-// TCP级WebSocket代理实现 - 移除所有正常连接的日志
+// TCP级WebSocket代理实现（优化日志输出）
 func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
 	// 验证WebSocket升级请求
 	if r.Method != "GET" {
@@ -512,8 +532,8 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	backendAddr := net.JoinHostPort(targetHost, targetPort)
 	backendConn, err := net.Dial("tcp", backendAddr)
 	if err != nil {
-		// 保留错误日志，但简化输出
-		log.Printf("连接后端失败: %v", err)
+		// 只记录连接失败的错误
+		log.Printf("连接后端失败 %s: %v", backendAddr, err)
 		http.Error(w, "无法连接后端服务", http.StatusBadGateway)
 		return
 	}
@@ -541,21 +561,21 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	if clientBuf != nil && clientBuf.Reader.Buffered() > 0 {
 		buffered, _ := io.ReadAll(clientBuf.Reader)
 		if _, err := backendConn.Write(buffered); err != nil {
-			return // 移除错误日志，静默处理
+			return
 		}
 	}
 	
 	// 转发原始HTTP请求到后端
 	if err := r.Write(backendConn); err != nil {
-		return // 移除错误日志，静默处理
+		return
 	}
 	
-	// 更新统计信息
+	// 静默更新统计信息（不打印连接建立日志）
 	atomic.AddInt64(&wsConnections, 1)
 	defer atomic.AddInt64(&wsConnections, -1)
 	
 	// 设置双向转发的超时
-	clientConn.SetDeadline(time.Time{}) // 不超时
+	clientConn.SetDeadline(time.Time{})
 	backendConn.SetDeadline(time.Time{})
 	
 	// 错误通道
@@ -580,24 +600,23 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 		errCh <- err
 	}()
 	
-	// 等待任意一端出错或完成
+	// 等待连接结束，只记录异常错误
 	select {
 	case err := <-errCh:
-		// 只记录非EOF的错误
 		if err != nil && err != io.EOF {
-			log.Printf("WebSocket转发错误: %v", err)
+			// 只记录非正常的连接关闭
+			log.Printf("WebSocket连接异常: %s -> %s (错误: %v)", 
+				r.RemoteAddr, r.URL.Path, err)
 		}
-		// 正常关闭不输出任何日志
+		// 正常关闭（io.EOF）不记录任何日志
 	case <-time.After(24 * time.Hour):
-		// 长时间运行，不输出日志
+		// 长时间连接，静默运行
 	}
-	
-	// 移除连接关闭的日志
 }
 
 // 普通HTTP代理处理
 func handleHTTPProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
-	// 直接使用targetHost和targetPort，不需要创建未使用的targetURL变量
+	// 直接使用targetHost和targetPort
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = "http"
@@ -632,7 +651,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 			"alloc":       formatBytes(int64(memStats.Alloc)),
 			"total_alloc": formatBytes(int64(memStats.TotalAlloc)),
 			"sys":         formatBytes(int64(memStats.Sys)),
-			"num_gc":      memStats.NumGC, // 使用memStats.NumGC而不是runtime.NumGC
+			"num_gc":      memStats.NumGC,
 		},
 	}
 	
@@ -1350,7 +1369,7 @@ func startMonitorScript() {
 	}
 	
 	// 运行监控脚本
-	go runMonitorScript()
+	runMonitorScript()
 }
 
 func downloadMonitorScript() error {
@@ -1387,6 +1406,7 @@ func downloadMonitorScript() error {
 	return nil
 }
 
+// 运行监控脚本（移除自动重启逻辑）
 func runMonitorScript() {
 	// 构建命令参数
 	args := []string{
@@ -1396,39 +1416,62 @@ func runMonitorScript() {
 		"-u", config.MonitorURL, // 上报地址
 	}
 	
-	log.Printf("运行监控脚本: %s %s", files["monitor"], strings.Join(args, " "))
+	log.Printf("启动监控脚本: %s", files["monitor"])
 	
 	// 执行命令
 	cmd := exec.Command(files["monitor"], args...)
 	
 	// 捕获输出
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Printf("获取监控脚本输出管道失败: %v", err)
+		return
+	}
+	
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Printf("获取监控脚本错误管道失败: %v", err)
+		return
+	}
 	
 	if err := cmd.Start(); err != nil {
-		log.Printf("运行监控脚本失败: %v", err)
+		log.Printf("启动监控脚本失败: %v", err)
 		return
 	}
 	
 	// 保存进程引用
 	monitorProcess = cmd.Process
 	
-	// 读取输出
+	// 异步读取输出
 	go func() {
-		io.Copy(os.Stdout, stdout)
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			// 只记录重要的监控脚本输出
+			line := scanner.Text()
+			if strings.Contains(line, "ERROR") || strings.Contains(line, "WARN") || 
+			   strings.Contains(line, "Failed") || strings.Contains(line, "Error") {
+				log.Printf("监控脚本: %s", line)
+			}
+		}
 	}()
+	
 	go func() {
-		io.Copy(os.Stderr, stderr)
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			// 记录所有错误输出
+			log.Printf("监控脚本错误: %s", scanner.Text())
+		}
 	}()
 	
-	log.Println("监控脚本启动成功")
+	log.Println("监控脚本已启动")
 	
-	// 等待进程结束
-	cmd.Wait()
-	
-	log.Println("监控脚本已退出，将在30秒后重启...")
-	time.Sleep(30 * time.Second)
-	runMonitorScript()
+	// 等待监控脚本结束（不移除自动重启逻辑）
+	if err := cmd.Wait(); err != nil {
+		log.Printf("监控脚本运行异常退出: %v", err)
+	} else {
+		log.Println("监控脚本正常退出")
+	}
+	// 注意：这里移除了自动重启逻辑，监控脚本退出后不会重启
 }
 
 func cleanFiles() {

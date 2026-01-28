@@ -9,7 +9,7 @@ on:
         default: 'latest'
         type: string
       custom-image-name:
-        description: '自定义镜像名称 (留空则使用默认)'
+        description: '自定义镜像名称 (留空则使用默认:go-argo)'
         required: false
         default: ''
         type: string

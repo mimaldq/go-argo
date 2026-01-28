@@ -51,28 +51,79 @@ jobs:
             org.opencontainers.image.licenses=MIT
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # 添加metadata输出
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }},push-by-digest=true,name-canonical=true
 
-      - name: Check multi-platform image sizes
+      - name: Inspect and display image size
         run: |
-          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
+          # 获取构建的镜像digest
+          DIGEST="${{ steps.build-push.outputs.digest }}"
           
-          echo "📊 Multi-platform Image Size Report"
-          echo "=================================="
+          if [ -n "$DIGEST" ]; then
+            echo "Image digest: $DIGEST"
+            
+            # 使用docker manifest inspect检查多平台镜像大小
+            FULL_IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
+            
+            echo "=== Image Size Information ==="
+            echo "Checking image: $FULL_IMAGE_NAME"
+            
+            # 检查每个平台的镜像大小
+            MANIFEST_INFO=$(docker buildx imagetools inspect "$FULL_IMAGE_NAME" --raw 2>/dev/null || docker manifest inspect "$FULL_IMAGE_NAME" 2>/dev/null)
+            
+            if [ -n "$MANIFEST_INFO" ]; then
+              echo "Multi-platform image manifest found:"
+              
+              # 使用jq解析manifest信息（如果可用）
+              if command -v jq >/dev/null 2>&1; then
+                echo $MANIFEST_INFO | jq -r '
+                  if .manifests then
+                    "Platforms found:",
+                    (.manifests[] | "  - \(.platform.os)/\(.platform.architecture): \(.size / 1024 / 1024 | floor) MB (\(.size) bytes)")
+                  elif .schemaVersion == 2 and .mediaType then
+                    "Single platform image: \(.config.size / 1024 / 1024 | floor) MB (\(.config.size) bytes)"
+                  else
+                    "Unknown manifest format"
+                  end'
+                
+                # 计算总大小
+                TOTAL_SIZE=$(echo $MANIFEST_INFO | jq '[.manifests[].size] | add // .config.size // 0')
+                if [ "$TOTAL_SIZE" -gt 0 ]; then
+                  TOTAL_MB=$(echo "$TOTAL_SIZE / 1024 / 1024" | bc)
+                  echo ""
+                  echo "Total compressed size (all platforms): $TOTAL_MB MB"
+                fi
+              else
+                echo "jq not available, showing raw manifest info:"
+                echo "$MANIFEST_INFO"
+              fi
+            else
+              echo "Unable to retrieve image manifest information"
+            fi
+            
+            # 尝试使用docker inspect获取本地构建缓存中的镜像大小
+            echo ""
+            echo "=== Checking local build cache ==="
+            docker buildx du --verbose || echo "Buildx disk usage command not available"
+          else
+            echo "No image digest found in build output"
+          fi
+
+      - name: Display additional build information
+        run: |
+          # 显示构建时间信息
+          if [ -n "${{ steps.build-push.outputs.imageid }}" ]; then
+            echo "Build completed successfully!"
+            echo "Image ID: ${{ steps.build-push.outputs.imageid }}"
+          fi
           
-          # 使用docker buildx imagetools inspect获取详细大小信息
-          docker buildx imagetools inspect $IMAGE_TAG --format '
-          {{- $totalSize := 0 -}}
-          {{- range $manifest := .Manifests -}}
-            {{- $platform := printf "%s/%s" $manifest.Platform.OS $manifest.Platform.Architecture -}}
-            {{- $sizeMB := div $manifest.Size 1000000.0 -}}
-            {{- $totalSize = add $totalSize $manifest.Size -}}
-            Platform: {{$platform}}
-            Size: {{printf "%.2f" $sizeMB}} MB
-            -------------------------
-          {{- end -}}
-          {{- $totalSizeMB := div $totalSize 1000000.0 -}}
+          # 显示标签信息
+          echo ""
+          echo "=== Image Tags ==="
+          echo "Primary tag: ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
+          echo "Latest tag: ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:latest"
           
-          Total Size (all platforms): {{printf "%.2f" $totalSizeMB}} MB
-          '
-          
-          echo -e "\n✅ Image size check completed!"
+          # 显示仓库URL
+          echo ""
+          echo "=== Container Registry URL ==="
+          echo "https://ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}"

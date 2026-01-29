@@ -44,6 +44,7 @@ type Config struct {
 	MonitorKey    string
 	MonitorServer string
 	MonitorURL    string
+	VerboseWSLog  bool // 控制WebSocket详细日志
 }
 
 // 全局变量
@@ -58,6 +59,8 @@ var (
 	// 统计信息
 	wsConnections int64
 	totalBytes    int64
+	lastLogTime   time.Time
+	logMutex      sync.Mutex
 )
 
 func main() {
@@ -123,12 +126,14 @@ func initConfig() {
 		MonitorKey:    getEnv("MONITOR_KEY", ""),
 		MonitorServer: getEnv("MONITOR_SERVER", ""),
 		MonitorURL:    getEnv("MONITOR_URL", ""),
+		VerboseWSLog:  getEnv("VERBOSE_WS_LOG", "false") == "true", // 默认为false
 	}
 
 	log.Println("配置初始化完成")
 	log.Printf("UUID: %s", config.UUID)
 	log.Printf("Argo端口: %s", config.ArgoPort)
 	log.Printf("HTTP端口: %s", config.Port)
+	log.Printf("WebSocket详细日志: %v", config.VerboseWSLog)
 }
 
 func tunePerformance() {
@@ -299,7 +304,7 @@ func generateXrayConfig() {
 					"clients": []map[string]interface{}{
 						{"id": config.UUID, "level": 0},
 					},
-					"decryption": "none",
+					"decription": "none",
 				},
 				"streamSettings": map[string]interface{}{
 					"network":  "ws",
@@ -454,8 +459,9 @@ func startProxyServer() {
 		Handler: mux,
 	}
 	
-	// 移除WebSocket相关日志，只保留基本服务器启动信息
-	log.Printf("代理服务器启动在端口: %s", config.ArgoPort)
+	log.Printf("TCP级WebSocket代理服务器启动在端口: %s", config.ArgoPort)
+	log.Printf("HTTP流量 -> localhost:%s", config.Port)
+	log.Printf("Xray流量 -> localhost:3001")
 	
 	if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("代理服务器启动失败: %v", err)
@@ -494,8 +500,14 @@ func handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	handleHTTPProxy(w, r, targetHost, targetPort)
 }
 
-// TCP级WebSocket代理实现 - 移除所有正常连接的日志
+// TCP级WebSocket代理实现 - 修改了日志输出
 func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
+	// 只有在详细日志模式下才打印请求日志
+	if config.VerboseWSLog {
+		log.Printf("WebSocket代理请求: %s %s -> %s:%s", 
+			r.Method, r.URL.Path, targetHost, targetPort)
+	}
+	
 	// 验证WebSocket升级请求
 	if r.Method != "GET" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -512,8 +524,7 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	backendAddr := net.JoinHostPort(targetHost, targetPort)
 	backendConn, err := net.Dial("tcp", backendAddr)
 	if err != nil {
-		// 保留错误日志，但简化输出
-		log.Printf("连接后端失败: %v", err)
+		log.Printf("连接后端失败 %s: %v", backendAddr, err)
 		http.Error(w, "无法连接后端服务", http.StatusBadGateway)
 		return
 	}
@@ -541,18 +552,26 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	if clientBuf != nil && clientBuf.Reader.Buffered() > 0 {
 		buffered, _ := io.ReadAll(clientBuf.Reader)
 		if _, err := backendConn.Write(buffered); err != nil {
-			return // 移除错误日志，静默处理
+			log.Printf("发送缓冲数据失败: %v", err)
+			return
 		}
 	}
 	
 	// 转发原始HTTP请求到后端
 	if err := r.Write(backendConn); err != nil {
-		return // 移除错误日志，静默处理
+		log.Printf("转发请求失败: %v", err)
+		return
 	}
 	
 	// 更新统计信息
 	atomic.AddInt64(&wsConnections, 1)
 	defer atomic.AddInt64(&wsConnections, -1)
+	
+	// 只在详细日志模式下打印连接建立日志
+	if config.VerboseWSLog {
+		log.Printf("WebSocket隧道建立: %s -> %s:%s", 
+			r.RemoteAddr, targetHost, targetPort)
+	}
 	
 	// 设置双向转发的超时
 	clientConn.SetDeadline(time.Time{}) // 不超时
@@ -583,21 +602,23 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	// 等待任意一端出错或完成
 	select {
 	case err := <-errCh:
-		// 只记录非EOF的错误
 		if err != nil && err != io.EOF {
-			log.Printf("WebSocket转发错误: %v", err)
+			// 错误日志总是打印
+			log.Printf("WebSocket转发错误: %v (路径: %s)", err, r.URL.Path)
+		} else {
+			// 正常关闭，只在详细日志模式下打印
+			if config.VerboseWSLog {
+				log.Printf("WebSocket连接关闭: %s (转发: %d bytes)", 
+					r.RemoteAddr, atomic.LoadInt64(&bytesForwarded))
+			}
 		}
-		// 正常关闭不输出任何日志
 	case <-time.After(24 * time.Hour):
-		// 长时间运行，不输出日志
+		// 长时间运行，正常情况
 	}
-	
-	// 移除连接关闭的日志
 }
 
 // 普通HTTP代理处理
 func handleHTTPProxy(w http.ResponseWriter, r *http.Request, targetHost, targetPort string) {
-	// 直接使用targetHost和targetPort，不需要创建未使用的targetURL变量
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = "http"
@@ -620,7 +641,6 @@ func handleHTTPProxy(w http.ResponseWriter, r *http.Request, targetHost, targetP
 
 // 处理统计信息请求
 func handleStats(w http.ResponseWriter, r *http.Request) {
-	// 使用runtime.ReadMemStats获取内存统计信息
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	
@@ -632,7 +652,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 			"alloc":       formatBytes(int64(memStats.Alloc)),
 			"total_alloc": formatBytes(int64(memStats.TotalAlloc)),
 			"sys":         formatBytes(int64(memStats.Sys)),
-			"num_gc":      memStats.NumGC, // 使用memStats.NumGC而不是runtime.NumGC
+			"num_gc":      memStats.NumGC,
 		},
 	}
 	
@@ -714,8 +734,8 @@ func startMainProcess() {
 	// 自动访问任务
 	addVisitTask()
 	
-	// 启动监控脚本
-	go startMonitorScript()
+	// 启动监控脚本（只运行一次）
+	go runMonitorOnce()
 	
 	// 清理文件
 	go func() {
@@ -1325,7 +1345,8 @@ func addVisitTask() {
 	}
 }
 
-func startMonitorScript() {
+// 只运行一次监控脚本，不重启
+func runMonitorOnce() {
 	// 检查监控配置是否完整
 	if config.MonitorKey == "" || config.MonitorServer == "" || config.MonitorURL == "" {
 		log.Println("监控环境变量不完整，跳过监控脚本启动")
@@ -1349,8 +1370,8 @@ func startMonitorScript() {
 		return
 	}
 	
-	// 运行监控脚本
-	go runMonitorScript()
+	// 运行监控脚本（只运行一次）
+	runMonitorScriptOnce()
 }
 
 func downloadMonitorScript() error {
@@ -1387,7 +1408,8 @@ func downloadMonitorScript() error {
 	return nil
 }
 
-func runMonitorScript() {
+// 运行监控脚本一次，不重启
+func runMonitorScriptOnce() {
 	// 构建命令参数
 	args := []string{
 		"-i",                    // 安装模式
@@ -1421,14 +1443,14 @@ func runMonitorScript() {
 		io.Copy(os.Stderr, stderr)
 	}()
 	
-	log.Println("监控脚本启动成功")
+	log.Println("监控脚本启动成功，将运行一次后退出")
 	
-	// 等待进程结束
-	cmd.Wait()
-	
-	log.Println("监控脚本已退出，将在30秒后重启...")
-	time.Sleep(30 * time.Second)
-	runMonitorScript()
+	// 等待进程结束，不重启
+	if err := cmd.Wait(); err != nil {
+		log.Printf("监控脚本运行结束，退出代码: %v", err)
+	} else {
+		log.Println("监控脚本运行完成")
+	}
 }
 
 func cleanFiles() {

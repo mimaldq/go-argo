@@ -399,11 +399,25 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+// cleanupOld 清理旧文件但不删除目录本身，避免权限问题
 func cleanupOld() {
 	deleteNodes()
-	if err := os.RemoveAll(config.FilePath); err != nil {
-		logWarn("清理目录失败: %v", err)
+	// 清空目录内容，但保留目录
+	if err := filepath.Walk(config.FilePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // 跳过无法访问的路径
+		}
+		if path == config.FilePath {
+			return nil // 跳过根目录
+		}
+		if err := os.RemoveAll(path); err != nil {
+			logDebug("清理旧文件失败（可忽略）: %v", err)
+		}
+		return nil
+	}); err != nil {
+		logDebug("遍历目录失败（可忽略）: %v", err)
 	}
+	// 确保目录存在（如果被意外删除则重建）
 	os.MkdirAll(config.FilePath, 0755)
 }
 

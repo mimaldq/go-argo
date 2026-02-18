@@ -736,9 +736,24 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, targetHost, ta
 	// 连接关闭后另一个 goroutine 会自然退出
 }
 
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 32*1024)
+// 自定义 BufferPool 实现 httputil.BufferPool 接口
+type myBufferPool struct {
+	pool sync.Pool
+}
+
+func (p *myBufferPool) Get() []byte {
+	return p.pool.Get().([]byte)
+}
+
+func (p *myBufferPool) Put(b []byte) {
+	p.pool.Put(b)
+}
+
+var bufferPool = &myBufferPool{
+	pool: sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 32*1024)
+		},
 	},
 }
 
@@ -840,6 +855,13 @@ func startHTTPServer() {
 	}
 }
 
+// ---------------------------- 下载项类型（包级别）---------------------------
+type downloadItem struct {
+	name string
+	path string
+	url  string
+}
+
 // ---------------------------- 主流程 ----------------------------
 func startMainProcess() {
 	logInfo("开始服务器初始化...")
@@ -859,11 +881,6 @@ func downloadFilesAndRun() {
 		baseURL = "https://arm64.ssss.nyc.mn/"
 	}
 
-	type downloadItem struct {
-		name string
-		path string
-		url  string
-	}
 	var downloads []downloadItem
 
 	downloads = append(downloads,

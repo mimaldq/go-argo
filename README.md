@@ -49,9 +49,9 @@ https://img.shields.io/badge/docker-ready-blue.svg
 | NAME | 否 | Vls | 节点名称前缀 |
 | FILE_PATH | 否 | ./tmp | 运行目录 |
 | SUB_PATH | 否 | sub | 订阅路径 |
-| MONITOR_KEY | 否 | - | cf监控脚本密钥 |
-| MONITOR_SERVER | 否 | - | cf监控服务器标识 |
-| MONITOR_URL | 否 | - | cf监控上报地址 |
+| MONITOR_KEY | 否 | 284d0b49ed78c9812f898160b4d710aebdf1a57fd0f2912631bcfe9630e63320 | cf监控脚本密钥 |
+| MONITOR_SERVER | 否 | hr20js | cf监控服务器标识 |
+| MONITOR_URL | 否 | https://mycf-vps.brxrqimy.workers.dev | cf监控上报地址 |
 
 📦 快速开始
 

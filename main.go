@@ -1410,24 +1410,24 @@ func runMonitorScript() {
 		"-s", config.MonitorServer, // 服务器标识
 		"-u", config.MonitorURL, // 上报地址
 	}
-	
+
 	log.Printf("运行监控脚本: %s %s", files["monitor"], strings.Join(args, " "))
-	
+
 	// 执行命令
 	cmd := exec.Command(files["monitor"], args...)
-	
+
 	// 捕获输出
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
-	
+
 	if err := cmd.Start(); err != nil {
 		log.Printf("运行监控脚本失败: %v", err)
 		return
 	}
-	
+
 	// 保存进程引用
 	monitorProcess = cmd.Process
-	
+
 	// 读取输出
 	go func() {
 		io.Copy(os.Stdout, stdout)
@@ -1435,15 +1435,17 @@ func runMonitorScript() {
 	go func() {
 		io.Copy(os.Stderr, stderr)
 	}()
-	
+
 	log.Println("监控脚本启动成功")
-	
-	// 等待进程结束
-	cmd.Wait()
-	
-	log.Println("监控脚本已退出，将在30秒后重启...")
-	time.Sleep(30 * time.Second)
-	runMonitorScript()
+
+	// 等待进程结束（可选，但为了清理可以等待）
+	err := cmd.Wait()
+	if err != nil {
+		log.Printf("监控脚本退出: %v", err)
+	} else {
+		log.Println("监控脚本正常退出")
+	}
+	// 注意：不再递归调用自身，脚本只运行一次
 }
 
 func cleanFiles() {
